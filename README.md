@@ -15,7 +15,7 @@ or you can source the included pdf file SETUP.pdf
 
 ## Package build instructions
 
-To build the package use included scripts [not yet initialized inside the repository] or do the following:
+To build the packages do the following:
 
 > Do this to start the docker containing the full jazzy installation:
 
@@ -27,6 +27,9 @@ To build the package use included scripts [not yet initialized inside the reposi
 > After this step, you can use the scripts linked through the docker working directory or run :
 
 ```bash
+# Installs the specified dependencies of packages
+> rosedep install -i --from-path src --rosdistro jazzy -y #you have to be in the package directory 
+
 # Provides the environment for running ros2 commands
 > source /opt/ros/jazzy/setup.bash
 > source /opt/turtlebot3_ws/install/setup.bash
@@ -34,9 +37,25 @@ To build the package use included scripts [not yet initialized inside the reposi
 # This builds the source files of the package
 > cd <package name> && colcon build #or 
 > colcon build --packages-select <package name>
+```
+## Running any package
 
-# This Step is for launching the application.
+To run any package you source a `*.launch.py` and run the following :
+
+> Specify the package name in ***package name*** and ***launch file***
+
+```bash
 > source install/setup.bash
 > export TURTLEBOT3_MODEL=burger
 > ros2 launch <package name> <launch file>.launch.py
+```
+
+Or alternatively you can run any node with :
+
+> Specify both ***package name*** and ***node name***. You can find their alias and source file in CMakeLists.txt
+
+```bash
+> source install/setup.bash
+> export TURTLEBOT3_MODEL=burger
+> ros2 run <package name> <node name>
 ```
