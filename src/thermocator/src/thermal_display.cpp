@@ -34,6 +34,7 @@ ThermalDisplay::ThermalDisplay() {
         "Hot Color", QColor(255, 0, 0),
         "Color mapped to maximum temperature (value = 100)",
         this, SLOT(onColorsChanged()));
+    topic_property_->setValue("/thermal_map");
 }
 
 ThermalDisplay::~ThermalDisplay() {

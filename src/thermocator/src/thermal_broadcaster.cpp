@@ -26,6 +26,7 @@ class ThermalBroadcaster : public rclcpp::Node {
         declare_parameter("publish_rate", 5.0);
         declare_parameter("map_frame", std::string("map"));
         declare_parameter("robot_frame", std::string("base_footprint"));
+        set_parameter(rclcpp::Parameter("use_sim_time", true));
 
         const auto cx = get_parameter("zone_centers_x").as_double_array();
         const auto cy = get_parameter("zone_centers_y").as_double_array();

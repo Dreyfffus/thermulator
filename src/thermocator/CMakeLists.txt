@@ -22,6 +22,7 @@ find_package(rviz_common REQUIRED)
 find_package(rviz_rendering REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rviz_ogre_vendor REQUIRED)
+find_package(Qt5 REQUIRED COMPONENTS Core Widgets)
 
 # ── Shared dependency list ────────────────────────────────────────────────────
 set(THERMOCATOR_DEPS
@@ -64,6 +65,7 @@ target_compile_features(thermal_broadcaster PUBLIC cxx_std_17)
 # ── thermocator_display — RViz2 plugin shared library ─────────────────────────
 add_library(thermocator_display SHARED
   src/thermal_display.cpp
+  include/thermocator/thermal_display.hpp
 )
 ament_target_dependencies(thermocator_display
   ${THERMOCATOR_DEPS}
@@ -78,6 +80,11 @@ target_include_directories(thermocator_display BEFORE PUBLIC
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
 )
 target_compile_features(thermocator_display PUBLIC cxx_std_17)
+
+target_link_libraries(thermocator_display
+    Qt5::Core
+    Qt5::Widgets
+)
 
 # Required for Qt MOC — RViz2 plugins use Qt signals/slots
 set_property(TARGET thermocator_display PROPERTY AUTOMOC ON)
