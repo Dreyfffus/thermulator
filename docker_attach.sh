@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "Attaching Teleop Keyboard ..."
+echo "Attaching to current session ..."
 
 # Attaching this shell to the current running turtlebot3 container
 
