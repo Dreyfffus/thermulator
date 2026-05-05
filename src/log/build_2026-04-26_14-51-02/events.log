@@ -1,4 +1,0 @@
-[0.000000] (-) TimerEvent: {}
-[0.000436] (-) JobUnselected: {'identifier': 'my_tb3_world'}
-[0.000459] (-) JobUnselected: {'identifier': 'tb3_test'}
-[0.000473] (-) EventReactorShutdown: {}
