@@ -149,31 +149,23 @@ void ThermalDisplay::updateTexture(const nav_msgs::msg::OccupancyGrid &grid) {
     const uint32_t h = grid.info.height;
 
     if (!_texture ||
-        _texture->getWidth() != w ||
-        _texture->getHeight() != h) {
+        _texture->getWidth() != h ||
+        _texture->getHeight() != w) {
         if (_texture) {
             Ogre::TextureManager::getSingleton().remove(_texture->getHandle());
         }
-
         _texture = Ogre::TextureManager::getSingleton().createManual(
             _base_name + "_tex",
             _resource_group_name,
             Ogre::TEX_TYPE_2D,
-            w, h, 0,
+            h, w,
+            0,
             Ogre::PF_BYTE_RGBA,
             Ogre::TU_DYNAMIC_WRITE_ONLY_DISCARDABLE);
 
         _material->getTechnique(0)->getPass(0)->getTextureUnitState(0)->setTextureName(_texture->getName());
     }
 
-    Ogre::HardwarePixelBufferSharedPtr pixel_buffer = _texture->getBuffer();
-
-    pixel_buffer->lock(Ogre::HardwareBuffer::HBL_DISCARD);
-
-    uint8_t *data =
-        static_cast<uint8_t *>(pixel_buffer->getCurrentLock().data);
-
-    // ── Pixel loop ────────────────────────────────────────────────────────
     const float alpha = _alpha_property->getFloat();
     const QColor cold = _cold_color_property->getColor();
     const QColor hot = _hot_color_property->getColor();
@@ -183,11 +175,17 @@ void ThermalDisplay::updateTexture(const nav_msgs::msg::OccupancyGrid &grid) {
     const float dg = static_cast<float>(hot.green() - cold.green());
     const float db = static_cast<float>(hot.blue() - cold.blue());
 
+    Ogre::HardwarePixelBufferSharedPtr pixel_buffer = _texture->getBuffer();
+    pixel_buffer->lock(Ogre::HardwareBuffer::HBL_DISCARD);
+    uint8_t *data = static_cast<uint8_t *>(pixel_buffer->getCurrentLock().data);
+
     for (uint32_t row = 0; row < h; ++row) {
         for (uint32_t col = 0; col < w; ++col) {
             const std::size_t grid_idx = static_cast<std::size_t>(row) * w + col;
-            const std::size_t tex_row = h - 1 - row;
-            const std::size_t pixel_idx = (tex_row * w + col) * 4;
+
+            const std::size_t out_row = static_cast<std::size_t>(col);
+            const std::size_t out_col = static_cast<std::size_t>(row);
+            const std::size_t pixel_idx = (out_row * h + out_col) * 4;
 
             const int8_t value = grid.data[grid_idx];
 
@@ -205,6 +203,7 @@ void ThermalDisplay::updateTexture(const nav_msgs::msg::OccupancyGrid &grid) {
             }
         }
     }
+
     pixel_buffer->unlock();
 }
 
