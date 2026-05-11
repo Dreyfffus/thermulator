@@ -23,7 +23,7 @@
 - The Nav2 thermal costmap plugin is registered and configured but still needs runtime verification.
 - The goal behavior from `decision_node` still needs scenario testing with Nav2 active.
 - Gazebo bridge topic names may need adjustment if the active TurtleBot3 Gazebo model publishes namespaced Gazebo topics.
-- `/dt/cmd_vel -> /cmd_vel` forwarding is implemented, but bidirectional motion must be verified with the running simulation.
+- `/dt/cmd_vel -> /cmd_vel` forwarding is implemented. The DT input uses `geometry_msgs/msg/Twist`; the mediator republishes `geometry_msgs/msg/TwistStamped` on `/cmd_vel` for Jazzy/TurtleBot3/Nav2 compatibility. Bidirectional motion must be verified with the running simulation.
 - End-to-end timing tolerance must be measured during a live demo run.
 
 ## Known risks intentionally not fixed here

@@ -2,6 +2,7 @@
 #include <string>
 
 #include <geometry_msgs/msg/twist.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -21,7 +22,7 @@ class DtMediator : public rclcpp::Node {
         map_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>("/dt/map", latched_qos);
         thermal_map_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>("/dt/thermal_map", latched_qos);
         thermal_reading_pub_ = create_publisher<sensor_msgs::msg::Temperature>("/dt/thermal_reading", qos);
-        cmd_vel_pub_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", qos);
+        cmd_vel_pub_ = create_publisher<geometry_msgs::msg::TwistStamped>("/cmd_vel", qos);
 
         odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
             "/odom", qos,
@@ -62,7 +63,11 @@ class DtMediator : public rclcpp::Node {
             "/dt/cmd_vel", qos,
             [this](geometry_msgs::msg::Twist::SharedPtr msg) {
                 logStream("/dt/cmd_vel", "/cmd_vel");
-                cmd_vel_pub_->publish(*msg);
+                geometry_msgs::msg::TwistStamped stamped_msg;
+                stamped_msg.header.stamp = now();
+                stamped_msg.header.frame_id = "base_link";
+                stamped_msg.twist = *msg;
+                cmd_vel_pub_->publish(stamped_msg);
             });
 
         RCLCPP_INFO(
@@ -82,7 +87,7 @@ class DtMediator : public rclcpp::Node {
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_pub_;
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr thermal_map_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Temperature>::SharedPtr thermal_reading_pub_;
-    rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr cmd_vel_pub_;
 
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;

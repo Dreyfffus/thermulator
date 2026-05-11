@@ -45,7 +45,7 @@
 - Objective: verify command flow from DT interface to robot/simulation command topic.
 - Command: `ros2 topic pub --once /dt/cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.05}, angular: {z: 0.0}}"`
 - Expected topics/nodes: `dt_mediator`, `/dt/cmd_vel`, `/cmd_vel`.
-- Pass condition: `/cmd_vel` receives the forwarded command and the robot moves if the simulator accepts `/cmd_vel`.
+- Pass condition: `/cmd_vel` receives the forwarded `geometry_msgs/msg/TwistStamped` command and the robot moves if the simulator accepts `/cmd_vel`.
 - Current status: implemented, untested.
 
 ## 7. Real-time synchronization and tolerance

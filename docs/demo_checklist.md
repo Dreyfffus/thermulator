@@ -49,6 +49,8 @@ Verify the command is forwarded:
 ros2 topic echo /cmd_vel --once
 ```
 
+Expected result: `/cmd_vel` receives a `geometry_msgs/msg/TwistStamped` message and the robot moves forward in Gazebo.
+
 ## Check sync monitor output
 
 The `dt_integration.launch.py` terminal should print lines like:

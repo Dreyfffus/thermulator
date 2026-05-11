@@ -26,7 +26,7 @@
 ## Command flow
 
 1. A test operator, demo script, or future DT controller publishes `geometry_msgs/msg/Twist` to `/dt/cmd_vel`.
-2. `dt_mediator` republishes the unchanged command to `/cmd_vel`.
+2. `dt_mediator` wraps the command in `geometry_msgs/msg/TwistStamped` and republishes it to `/cmd_vel`.
 3. The robot or Gazebo simulation consumes `/cmd_vel`.
 
 ## Sensor flow
