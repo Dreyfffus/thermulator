@@ -108,7 +108,7 @@ def generate_launch_description():
 
     frontier_min_distance_arg = DeclareLaunchArgument(
         "frontier_min_distance",
-        default_value="0.5",
+        default_value="0.8",
         description="Minimum distance in meters for a frontier to be considered",
     )
 

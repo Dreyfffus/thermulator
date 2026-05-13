@@ -81,11 +81,12 @@ case "$attach" in
                      params_file:=/ws/src/thermocator/config/slam_params.yaml"
                 ;;
 
-            nav_map)
+            nav)
                 docker exec -it turtlebot3_container bash -c \
                     "${SETUP} && \
-                     ros2 launch turtlebot3_navigation2 navigation2.launch.py \
+                     ros2 launch nav2_bringup navigation_launch.py \
                      use_sim_time:=True \
+                     autostart:=False \
                      params_file:=/ws/src/thermocator/config/nav2_slam_params.yaml"
                 ;;
 

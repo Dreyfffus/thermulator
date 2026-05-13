@@ -115,7 +115,8 @@ class DecisionNode : public rclcpp::Node {
     std::atomic<bool> goal_failed_{false};
     double current_goal_x_ = 0.0;
     double current_goal_y_ = 0.0;
-    rclcpp::Time investigation_start_;
+    std::chrono::steady_clock::time_point investigation_start_;
+    std::chrono::steady_clock::time_point complete_start_;
 
     // Parameters
     double heat_detection_threshold_;

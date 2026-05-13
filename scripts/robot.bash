@@ -48,8 +48,9 @@ case "$service" in
 
     nav)
         bash -c "${SETUP} && \
-                 ros2 launch turtlebot3_navigation2 navigation2.launch.py \
+                 ros2 launch nav2_bringup navigation_launch.py \
                  use_sim_time:=False \
+                 autostart:=False \
                  params_file:=${CONFIG_DIR}/nav2_slam_params.yaml"
         ;;
 

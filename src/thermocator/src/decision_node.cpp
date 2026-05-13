@@ -127,6 +127,7 @@ void DecisionNode::handleIdle() {
 }
 
 void DecisionNode::handleScanning() {
+
     const auto pose = getRobotPose();
     if (!pose.has_value()) {
         RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
@@ -185,11 +186,18 @@ void DecisionNode::handleScanning() {
     goal_succeeded_ = false;
     goal_failed_ = false;
 
+    RCLCPP_INFO(get_logger(),
+                "Frontier pool size: %zu  best score: %.3f  pos: (%.2f, %.2f)",
+                frontiers.size(), best.final_score, best.world_x, best.world_y);
+
     sendGoal(best.world_x, best.world_y);
     state_ = ExplorationState::NAVIGATING;
 }
 
 void DecisionNode::handleNavigating() {
+    RCLCPP_INFO(get_logger(),
+                "NAVIGATING -- active=%d succeeded=%d failed=%d",
+                goal_active_.load(), goal_succeeded_.load(), goal_failed_.load());
     if (goal_failed_) {
         RCLCPP_WARN(get_logger(), "Goal failed -- returning to scanning");
         goal_failed_ = false;
@@ -199,14 +207,14 @@ void DecisionNode::handleNavigating() {
     if (goal_succeeded_) {
         RCLCPP_INFO(get_logger(),
                     "Reached goal -- investigating for %.1fs", investigation_duration_);
-        investigation_start_ = now();
+        investigation_start_ = std::chrono::steady_clock::now();
         goal_succeeded_ = false;
         state_ = ExplorationState::INVESTIGATING;
     }
 }
 
 void DecisionNode::handleInvestigating() {
-    const double elapsed = (now() - investigation_start_).seconds();
+    const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - investigation_start_).count();
     if (elapsed >= investigation_duration_) {
         RCLCPP_INFO(get_logger(), "Investigation done -- rescanning");
         state_ = ExplorationState::SCANNING;
@@ -214,6 +222,12 @@ void DecisionNode::handleInvestigating() {
 }
 
 void DecisionNode::handleComplete() {
+
+    const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - complete_start_).count();
+    if (elapsed < 10.0)
+        return;
+    complete_start_ = std::chrono::steady_clock::now();
+
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 10000,
                          "Exploration complete -- monitoring for new frontiers");
 
@@ -268,7 +282,7 @@ std::vector<Frontier> DecisionNode::detectSpatialFrontiers(
         for (uint32_t col = 1; col < info.width - 1; ++col) {
 
             const size_t idx = static_cast<size_t>(row) * info.width + col;
-            if (spatial.data[idx] != 0)
+            if (spatial.data[idx] < 0 || spatial.data[idx] > 50)
                 continue;
 
             bool adj_unknown = false;
@@ -344,7 +358,7 @@ std::vector<Frontier> DecisionNode::detectThermalFrontiers(
         for (uint32_t col = 1; col < si.width - 1; ++col) {
 
             const size_t sidx = static_cast<size_t>(row) * si.width + col;
-            if (spatial.data[sidx] != 0)
+            if (spatial.data[sidx] < 0 || spatial.data[sidx] > 50)
                 continue;
 
             const double wx =
@@ -464,6 +478,18 @@ Frontier DecisionNode::selectBestFrontier(
 // ----------------------------------------------------------------------------
 
 void DecisionNode::sendGoal(double x, double y) {
+
+    const auto pose = getRobotPose();
+    if (pose.has_value()) {
+        const double dx = pose->first - x;
+        const double dy = pose->second - y;
+        const double dist = std::sqrt(dx * dx + dy * dy);
+        if (dist > 0.3) {
+            x += (dx / dist) * 0.3;
+            y += (dy / dist) * 0.3;
+        }
+    }
+
     nav2_msgs::action::NavigateToPose::Goal goal;
     goal.pose.header.stamp = now();
     goal.pose.header.frame_id = map_frame_;
