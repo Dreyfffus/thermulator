@@ -355,6 +355,8 @@ decision_node:
 > ***Unspecified Command Line Args*** as default arguments. The only exception to this is `use_sim_time`
 > for purposes of seamless transition, and `params_file` for obvious reasons.
 
+---
+
 ### Scripts 
 
 All scripts provided in the **`scripts/bin/`** folder can either be ran as is or they can be introduced
