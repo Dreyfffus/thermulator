@@ -129,13 +129,13 @@ case "$attach" in
                     docker exec -it turtlebot3_container bash -c \
                         "${SETUP} && \
                          cd /ws && colcon build \
-                         --packages-select ${package} \
+                         --packages-select ${package} --symlink-install \
                          --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
                 else
                     echo "Building all packages ..."
                     docker exec -it turtlebot3_container bash -c \
                         "${SETUP} && \
-                         cd /ws && colcon build \
+                         cd /ws && colcon build --symlink-install \
                          --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
                 fi
                 ;;

@@ -62,3 +62,7 @@ CATKIN_IGNORE
 install/
 build/
 log/
+
+!scripts/bin/
+!scripts/install/
+

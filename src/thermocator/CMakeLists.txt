@@ -24,6 +24,7 @@ find_package(Qt5 REQUIRED COMPONENTS Core Widgets)
 find_package(nav2_costmap_2d REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(nav2_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 
 set(THERMOCATOR_DEPS
   rclcpp
@@ -37,6 +38,7 @@ set(THERMOCATOR_DEPS
   std_msgs
   builtin_interfaces
   geometry_msgs
+  visualization_msgs
 )
 
 add_executable(decision_node

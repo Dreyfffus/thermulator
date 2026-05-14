@@ -103,12 +103,12 @@ case "$service" in
             echo "Building package: $package"
             bash -c "${SETUP} && \
                      cd ${WS_ROOT} && \
-                     colcon build --packages-select ${package}"
+                     colcon build --packages-select ${package} --symlink-install"
         else
             echo "Building all packages ..."
             bash -c "${SETUP} && \
                      cd ${WS_ROOT} && \
-                     colcon build"
+                     colcon build --symlink-install"
         fi
         ;;
 

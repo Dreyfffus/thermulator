@@ -1,0 +1,46 @@
+# =============================================================================
+# thermocator_params.yaml
+# Runtime parameters for all thermocator nodes.
+# Edit this file to tune behavior without recompiling or modifying launch files.
+# =============================================================================
+
+thermal_broadcaster:
+  ros__parameters:
+    map_frame: "map"
+    robot_frame: "base_footprint"
+    publish_rate: 2.5
+    noise_stdev: 0.5
+    # Heat zone definitions -- all arrays must be the same length
+    # Coordinates are in map frame (meters)
+    zone_centers_x: [0.2, 1.6]
+    zone_centers_y: [2.2, 2.3]
+    zone_peak_temps: [80.0, 60.0]
+    zone_sigmas: [1.2, 1.2]
+
+thermal_map_builder:
+  ros__parameters:
+    map_frame: "map"
+    robot_frame: "base_footprint"
+    # Temperature range mapped to occupancy values 0-100
+    cold_threshold: 0.0
+    hot_threshold: 80.0
+    min_confidence: 0.5
+    publish_rate: 1.0
+    tf_timeout: 0.1
+
+decision_node:
+  ros__parameters:
+    map_frame: "map"
+    robot_frame: "base_footprint"
+    heat_detection_threshold: 20.0
+    frontier_min_distance: 0.8
+    scoring_radius: 2.0
+    max_frontier_distance: 3.0
+    w_boundary: 1.0
+    w_thermal_boundary: 3.0
+    w_hot_interior: 0.5
+    w_cold_interior: 2.5
+    revisit_penalty_radius: 1.8
+    max_visited_goals: 12
+    investigation_duration: 5.0
+    control_rate: 1.0
