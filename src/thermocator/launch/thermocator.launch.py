@@ -13,17 +13,11 @@ def generate_launch_description():
     pkg = get_package_share_directory("thermocator")
     default_params_file = os.path.join(pkg, "config", "thermocator_params.yaml")
 
-    # -------------------------------------------------------------------------
-    # Arguments
-    # If params_file is provided and exists on disk, it overrides everything.
-    # If not found, individual arguments and their defaults are used instead.
-    # -------------------------------------------------------------------------
-
     params_file_arg = DeclareLaunchArgument(
         "params_file",
         default_value=default_params_file,
         description="Full path to thermocator_params.yaml. "
-        "If the file exists it overrides all individual arguments.",
+        "If found, overrides all individual arguments.",
     )
 
     use_sim_time_arg = DeclareLaunchArgument("use_sim_time", default_value="true")
@@ -31,6 +25,8 @@ def generate_launch_description():
     robot_frame_arg = DeclareLaunchArgument(
         "robot_frame", default_value="base_footprint"
     )
+
+    # Broadcaster
     zone_centers_x_arg = DeclareLaunchArgument(
         "zone_centers_x", default_value="[0.0, 1.5]"
     )
@@ -41,34 +37,56 @@ def generate_launch_description():
         "zone_peak_temps", default_value="[80.0, 60.0]"
     )
     zone_sigmas_arg = DeclareLaunchArgument("zone_sigmas", default_value="[1.2, 1.2]")
+
+    # Thermal map builder
     cold_threshold_arg = DeclareLaunchArgument("cold_threshold", default_value="0.0")
     hot_threshold_arg = DeclareLaunchArgument("hot_threshold", default_value="80.0")
     min_confidence_arg = DeclareLaunchArgument("min_confidence", default_value="0.5")
     publish_rate_arg = DeclareLaunchArgument("publish_rate", default_value="1.0")
-    heat_detection_threshold_arg = DeclareLaunchArgument(
-        "heat_detection_threshold", default_value="20.0"
+    prefill_map_arg = DeclareLaunchArgument("prefill_map", default_value="false")
+    prefill_temperature_arg = DeclareLaunchArgument(
+        "prefill_temperature", default_value="20.0"
     )
-    scoring_radius_arg = DeclareLaunchArgument("scoring_radius", default_value="1.5")
-    w_unknown_hot_arg = DeclareLaunchArgument("w_unknown_hot", default_value="3.0")
-    w_dist_hottest_arg = DeclareLaunchArgument("w_dist_hottest", default_value="2.0")
-    w_cold_penalty_arg = DeclareLaunchArgument("w_cold_penalty", default_value="0.2")
-    revisit_penalty_radius_arg = DeclareLaunchArgument(
-        "revisit_penalty_radius", default_value="0.8"
+
+    # Decision node -- Phase 1
+    coverage_threshold_arg = DeclareLaunchArgument(
+        "coverage_threshold", default_value="0.95"
     )
-    max_visited_goals_arg = DeclareLaunchArgument(
-        "max_visited_goals", default_value="10"
+    sensor_coverage_radius_arg = DeclareLaunchArgument(
+        "sensor_coverage_radius", default_value="0.3"
     )
-    frontier_min_distance_arg = DeclareLaunchArgument(
-        "frontier_min_distance", default_value="0.8"
+    goal_min_distance_arg = DeclareLaunchArgument(
+        "goal_min_distance", default_value="0.5"
     )
-    investigation_duration_arg = DeclareLaunchArgument(
-        "investigation_duration", default_value="5.0"
+    goal_timeout_seconds_arg = DeclareLaunchArgument(
+        "goal_timeout_seconds", default_value="30.0"
+    )
+    rescan_interval_seconds_arg = DeclareLaunchArgument(
+        "rescan_interval_seconds", default_value="10.0"
+    )
+    radius_initial_arg = DeclareLaunchArgument("radius_initial", default_value="1.5")
+    radius_step_arg = DeclareLaunchArgument("radius_step", default_value="0.5")
+    radius_max_arg = DeclareLaunchArgument("radius_max", default_value="8.0")
+    samples_per_cycle_arg = DeclareLaunchArgument(
+        "samples_per_cycle", default_value="40"
+    )
+    corridor_bonus_arg = DeclareLaunchArgument("corridor_bonus", default_value="0.3")
+
+    # Decision node -- Phase 2
+    action_zone_heat_threshold_arg = DeclareLaunchArgument(
+        "action_zone_heat_threshold", default_value="60.0"
+    )
+    action_zone_cluster_radius_arg = DeclareLaunchArgument(
+        "action_zone_cluster_radius", default_value="1.5"
+    )
+    action_zone_base_sigma_arg = DeclareLaunchArgument(
+        "action_zone_base_sigma", default_value="0.4"
+    )
+    action_delay_seconds_arg = DeclareLaunchArgument(
+        "action_delay_seconds", default_value="1.0"
     )
     control_rate_arg = DeclareLaunchArgument("control_rate", default_value="1.0")
 
-    # -------------------------------------------------------------------------
-    # OpaqueFunction resolves at launch time whether to use yaml or arguments
-    # -------------------------------------------------------------------------
     def launch_nodes(context):
         params_file = LaunchConfiguration("params_file").perform(context)
         use_sim_time = LaunchConfiguration("use_sim_time").perform(context) == "true"
@@ -79,7 +97,6 @@ def generate_launch_description():
             broadcaster_params = [params_file, {"use_sim_time": use_sim_time}]
             map_builder_params = [params_file, {"use_sim_time": use_sim_time}]
             decision_params = [params_file, {"use_sim_time": use_sim_time}]
-
         else:
             print(
                 f"[thermocator.launch] No yaml at {params_file} -- using launch arguments"
@@ -102,6 +119,9 @@ def generate_launch_description():
 
             def s(key):
                 return LaunchConfiguration(key).perform(context)
+
+            def b(key):
+                return LaunchConfiguration(key).perform(context).lower() == "true"
 
             broadcaster_params = [
                 {
@@ -127,6 +147,8 @@ def generate_launch_description():
                     "min_confidence": f("min_confidence"),
                     "publish_rate": f("publish_rate"),
                     "tf_timeout": 0.1,
+                    "prefill_map": b("prefill_map"),
+                    "prefill_temperature": f("prefill_temperature"),
                 }
             ]
 
@@ -135,15 +157,20 @@ def generate_launch_description():
                     "use_sim_time": use_sim_time,
                     "map_frame": s("map_frame"),
                     "robot_frame": s("robot_frame"),
-                    "heat_detection_threshold": f("heat_detection_threshold"),
-                    "scoring_radius": f("scoring_radius"),
-                    "w_unknown_hot": f("w_unknown_hot"),
-                    "w_dist_hottest": f("w_dist_hottest"),
-                    "w_cold_penalty": f("w_cold_penalty"),
-                    "revisit_penalty_radius": f("revisit_penalty_radius"),
-                    "max_visited_goals": i("max_visited_goals"),
-                    "frontier_min_distance": f("frontier_min_distance"),
-                    "investigation_duration": f("investigation_duration"),
+                    "coverage_threshold": f("coverage_threshold"),
+                    "sensor_coverage_radius": f("sensor_coverage_radius"),
+                    "goal_min_distance": f("goal_min_distance"),
+                    "goal_timeout_seconds": f("goal_timeout_seconds"),
+                    "rescan_interval_seconds": f("rescan_interval_seconds"),
+                    "radius_initial": f("radius_initial"),
+                    "radius_step": f("radius_step"),
+                    "radius_max": f("radius_max"),
+                    "samples_per_cycle": i("samples_per_cycle"),
+                    "corridor_bonus": f("corridor_bonus"),
+                    "action_zone_heat_threshold": f("action_zone_heat_threshold"),
+                    "action_zone_cluster_radius": f("action_zone_cluster_radius"),
+                    "action_zone_base_sigma": f("action_zone_base_sigma"),
+                    "action_delay_seconds": f("action_delay_seconds"),
                     "control_rate": f("control_rate"),
                 }
             ]
@@ -186,7 +213,6 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
-            # Arguments
             params_file_arg,
             use_sim_time_arg,
             map_frame_arg,
@@ -199,17 +225,23 @@ def generate_launch_description():
             hot_threshold_arg,
             min_confidence_arg,
             publish_rate_arg,
-            heat_detection_threshold_arg,
-            scoring_radius_arg,
-            w_unknown_hot_arg,
-            w_dist_hottest_arg,
-            w_cold_penalty_arg,
-            revisit_penalty_radius_arg,
-            max_visited_goals_arg,
-            frontier_min_distance_arg,
-            investigation_duration_arg,
+            prefill_map_arg,
+            prefill_temperature_arg,
+            coverage_threshold_arg,
+            sensor_coverage_radius_arg,
+            goal_min_distance_arg,
+            goal_timeout_seconds_arg,
+            rescan_interval_seconds_arg,
+            radius_initial_arg,
+            radius_step_arg,
+            radius_max_arg,
+            samples_per_cycle_arg,
+            corridor_bonus_arg,
+            action_zone_heat_threshold_arg,
+            action_zone_cluster_radius_arg,
+            action_zone_base_sigma_arg,
+            action_delay_seconds_arg,
             control_rate_arg,
-            # Node launcher
             OpaqueFunction(function=launch_nodes),
         ]
     )

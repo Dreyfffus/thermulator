@@ -2,9 +2,11 @@
 
 #include <atomic>
 #include <chrono>
-#include <deque>
+#include <memory>
 #include <mutex>
 #include <optional>
+#include <queue>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -17,26 +19,137 @@
 #include <tf2_ros/transform_listener.h>
 #include <visualization_msgs/msg/marker_array.hpp>
 
-namespace thermocator {
+#include "nav_msgs/msg/occupancy_grid.hpp"
+#include "thermocator/action_grid.hpp"
+#include "thermocator/node_context.hpp"
 
-enum class ExplorationState {
-    IDLE,
-    SCANNING,
-    NAVIGATING,
-    INVESTIGATING,
-    COMPLETE
-};
+namespace thermocator {
 
 struct Frontier {
     double world_x = 0.0;
     double world_y = 0.0;
+    double cluster_size = 0.0;
+    double corridor_gain = 0.0;
     double distance = 0.0;
-    double boundary_score = 0.0;
-    double thermal_bonus = 0.0;
-    double hot_interior = 0.0;
-    double cold_interior = 0.0;
-    double revisit_penalty = 0.0;
-    double final_score = 0.0;
+};
+
+class Explorer {
+  public:
+    struct Params {
+        double sensor_coverage_radius = 0.3;
+        double goal_timeout_seconds = 30.0;
+        double goal_min_distance = 0.5;
+        double coverage_threshold = 0.95;
+        double rescan_interval_seconds = 8.0;
+        double radius_initial = 1.5;
+        double radius_step = 0.5;
+        double radius_max = 8.0;
+        int samples_per_cycle = 40;
+        double corridor_bonus = 0.3;
+    };
+
+    explicit Explorer(NodeContext &ctx, const Params &p);
+
+    bool update();
+    bool isComplete() const { return complete_; }
+
+  private:
+    enum class State { SCANNING,
+                       NAVIGATING };
+
+    void handleScanning();
+    void handleNavigating();
+
+    double computeCoverageRatio(
+        const nav_msgs::msg::OccupancyGrid &spatial,
+        const nav_msgs::msg::OccupancyGrid &thermal) const;
+
+    std::vector<Frontier> detectTargets(
+        const nav_msgs::msg::OccupancyGrid &thermal,
+        const nav_msgs::msg::OccupancyGrid &costmap,
+        double rx, double ry) const;
+
+    Frontier chooseTarget(
+        std::vector<Frontier> &candidates,
+        const nav_msgs::msg::OccupancyGrid &costmap,
+        const nav_msgs::msg::OccupancyGrid &thermal,
+        double rx, double ry) const;
+
+    double estimateGain(
+        const nav_msgs::msg::OccupancyGrid &costmap,
+        const nav_msgs::msg::OccupancyGrid &thermal,
+        double rx, double ry, double gx, double gy) const;
+
+    void sendGoal(double x, double y);
+    void checkTimeout();
+    std::optional<std::pair<double, double>> getRobotPose() const;
+    void publishGoalMarker();
+
+    State state_ = State::SCANNING;
+    bool complete_ = false;
+    double _current_goal_x = 0.0;
+    double _current_goal_y = 0.0;
+
+    mutable double sample_radius_;
+    mutable std::mt19937 rng_;
+
+    NodeContext &ctx_;
+    Params default_params_;
+};
+
+class Actor {
+  public:
+    struct Params {
+        double heat_threshold = 60.0;
+        double cluster_radius = 1.5;
+        double base_sigma = 0.4;
+        double action_delay = 1.0;
+    };
+
+    explicit Actor(NodeContext &ctx, const Params &p);
+    bool update();
+    bool isComplete() const { return complete_; }
+
+  private:
+    enum class State { PLANNING,
+                       NAVIGATING,
+                       ACTIONING };
+
+    struct ActionZone {
+        double world_x = 0.0;
+        double world_y = 0.0;
+        double strength = 0.0;
+    };
+
+    void handlePlanning();
+    void handleNavigating();
+    void handleActioning();
+
+    std::vector<ActionZone> clusterHotSpots(
+        const nav_msgs::msg::OccupancyGrid &thermal) const;
+
+    std::vector<size_t> planRoute(
+        const std::vector<ActionZone> &zones,
+        double rx, double ry) const;
+
+    void publishZoneMarker(const ActionZone &zone, int id);
+    void publishActionMap(const ActionZone &zone);
+    void sendGoal(double x, double y);
+    std::optional<std::pair<double, double>> getRobotPose() const;
+
+    State state_ = State::PLANNING;
+    bool complete_ = false;
+
+    std::vector<ActionZone> zones_;
+    std::vector<size_t> route_;
+    size_t current_idx_ = 0;
+
+    ActionGrid action_grid_;
+
+    std::chrono::steady_clock::time_point action_start_;
+
+    NodeContext &ctx_;
+    Params params_;
 };
 
 class DecisionNode : public rclcpp::Node {
@@ -45,138 +158,47 @@ class DecisionNode : public rclcpp::Node {
     ~DecisionNode() override = default;
 
   private:
-    // Callbacks
     void thermalMapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
     void spatialMapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
-
-    // Control loop
+    void costmapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
     void controlLoop();
-    void handleIdle();
-    void handleScanning();
-    void handleNavigating();
-    void handleInvestigating();
-    void handleComplete();
 
-    // Phase detection
-    bool hasHeatData(const nav_msgs::msg::OccupancyGrid &thermal) const;
-
-    // Frontier detection
-    std::vector<Frontier> detectSpatialFrontiers(
-        const nav_msgs::msg::OccupancyGrid &spatial,
-        double robot_x, double robot_y) const;
-
-    std::vector<Frontier> detectThermalFrontiers(
-        const nav_msgs::msg::OccupancyGrid &spatial,
-        const nav_msgs::msg::OccupancyGrid &thermal,
-        double robot_x, double robot_y) const;
-
-    Frontier selectBestFrontier(std::vector<Frontier> &frontiers) const;
-
-    // Navigation
-    void sendGoal(double x, double y);
-    void cancelGoal();
-    void publishGoalMarker(double x, double y);
-
-    // Action client callbacks
     void goalResponseCallback(
         const rclcpp_action::ClientGoalHandle<
             nav2_msgs::action::NavigateToPose>::SharedPtr &handle);
-
     void feedbackCallback(
         rclcpp_action::ClientGoalHandle<
             nav2_msgs::action::NavigateToPose>::SharedPtr,
         const std::shared_ptr<
             const nav2_msgs::action::NavigateToPose::Feedback>
-            feedback);
-
+            fb);
     void resultCallback(
         const rclcpp_action::ClientGoalHandle<
             nav2_msgs::action::NavigateToPose>::WrappedResult &result);
 
-    // TF
-    std::optional<std::pair<double, double>> getRobotPose() const;
-
-    // -------------------------------------------------------------------------
-    // Subscriptions / publishers
-    // -------------------------------------------------------------------------
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr thermal_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr spatial_sub_;
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr goal_marker_pub_;
+    rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr costmap_sub_;
     rclcpp::TimerBase::SharedPtr control_timer_;
 
-    // Action client
     rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SharedPtr nav_client_;
     rclcpp_action::ClientGoalHandle<
         nav2_msgs::action::NavigateToPose>::SharedPtr current_goal_handle_;
 
-    // TF
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
-    // -------------------------------------------------------------------------
-    // Maps
-    // -------------------------------------------------------------------------
-    std::mutex map_mutex_;
-    nav_msgs::msg::OccupancyGrid::SharedPtr thermal_map_;
-    nav_msgs::msg::OccupancyGrid::SharedPtr spatial_map_;
-    bool thermal_map_received_ = false;
-    bool spatial_map_received_ = false;
+    std::shared_ptr<std::mutex> map_mutex_;
+    NodeContext ctx_;
 
-    // -------------------------------------------------------------------------
-    // State
-    // -------------------------------------------------------------------------
-    ExplorationState state_ = ExplorationState::IDLE;
-    std::atomic<bool> goal_active_{false};
-    std::atomic<bool> goal_succeeded_{false};
-    std::atomic<bool> goal_failed_{false};
-    double current_goal_x_ = 0.0;
-    double current_goal_y_ = 0.0;
+    std::unique_ptr<Explorer> explorer_;
+    std::unique_ptr<Actor> actor_;
 
-    // Investigation timer -- uses steady clock to avoid sim time source mismatch
-    std::chrono::steady_clock::time_point investigation_start_;
-
-    // Complete state recheck timer
-    std::chrono::steady_clock::time_point complete_start_;
-
-    // Visited goal memory for revisit suppression
-    std::deque<std::pair<double, double>> visited_goals_;
-
-    // Goal marker ID counter
-    int marker_id_ = 0;
-
-    // -------------------------------------------------------------------------
-    // Parameters
-    // -------------------------------------------------------------------------
-
-    // Frames
-    std::string map_frame_;
-    std::string robot_frame_;
-
-    // Phase detection
-    double heat_detection_threshold_; // occupancy value (0-100) = "hot"
-
-    // Spatial frontier detection
-    double frontier_min_distance_; // min distance from robot to consider a frontier
-
-    // Thermal frontier scoring
-    double scoring_radius_;        // meters around candidate to evaluate
-    double max_frontier_distance_; // hard cutoff: discard candidates with no
-                                   // known neighbor within this distance (meters)
-
-    // Scoring weights
-    double w_boundary_;         // reward: unknown cells on known/unknown boundary
-    double w_thermal_boundary_; // bonus:  boundary cells adjacent to hot cells
-    double w_hot_interior_;     // penalty: known hot cells inside scoring radius
-    double w_cold_interior_;    // penalty: known cold cells inside scoring radius
-                                //          (should be > w_hot_interior)
-
-    // Revisit suppression
-    double revisit_penalty_radius_; // meters: goals within this radius are penalised
-    int max_visited_goals_;         // how many past goals to remember
-
-    // Navigation timing
-    double investigation_duration_; // seconds to wait at goal before rescanning
-    double control_rate_;           // Hz
+    enum class Phase { WAITING,
+                       PHASE1,
+                       PHASE2,
+                       DONE };
+    Phase phase_ = Phase::WAITING;
 };
 
 } // namespace thermocator

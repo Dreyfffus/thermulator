@@ -3,7 +3,9 @@
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, TimerAction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
@@ -11,30 +13,39 @@ from launch_ros.actions import Node
 def generate_launch_description():
 
     pkg_thermocator = get_package_share_directory("thermocator")
-    pkg_cartographer = get_package_share_directory("cartographer_ros")
+    pkg_cartographer = get_package_share_directory("turtlebot3_cartographer")
     pkg_nav2_bringup = get_package_share_directory("nav2_bringup")
 
     nav2_params_file = os.path.join(pkg_thermocator, "config", "nav2_slam_params.yaml")
-
     thermocator_launch_file = os.path.join(
         pkg_thermocator, "launch", "thermocator.launch.py"
     )
+    rviz_config_file = os.path.join(pkg_thermocator, "config", "thermocator.rviz")
 
+    use_sim_time_arg = DeclareLaunchArgument("use_sim_time", default_value="true")
+    use_rviz_arg = DeclareLaunchArgument(
+        "use_rviz",
+        default_value="true",
+        description="Launch RViz2 with thermocator config",
+    )
+
+    use_sim_time = LaunchConfiguration("use_sim_time")
+    use_rviz = LaunchConfiguration("use_rviz")
+
+    # -------------------------------------------------------------------------
+    # Cartographer -- launched first, owns /map and map->odom TF
+    # -------------------------------------------------------------------------
     cartographer = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg_cartographer, "launch", "online_async_launch.py")
+            os.path.join(pkg_cartographer, "launch", "cartographer.launch.py")
         ),
         launch_arguments={
-            "use_sim_time": "true",
+            "use_sim_time": use_sim_time,
         }.items(),
     )
 
     # -------------------------------------------------------------------------
-    # Nav2 — delayed 5s to give slam_toolbox time to publish /map and TF
-    #
-    # autostart:=false disables nav2_bringup's own lifecycle manager so it
-    # does not attempt to activate nodes we have excluded (amcl, map_server,
-    # docking_server). Our lifecycle manager below takes full control.
+    # Nav2 -- delayed 5s, autostart disabled so our lifecycle manager controls it
     # -------------------------------------------------------------------------
     nav2 = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -42,20 +53,11 @@ def generate_launch_description():
         ),
         launch_arguments={
             "params_file": nav2_params_file,
-            "use_sim_time": "true",
+            "use_sim_time": use_sim_time,
             "autostart": "false",
         }.items(),
     )
 
-    # -------------------------------------------------------------------------
-    # Lifecycle manager — replaces nav2_bringup's hardcoded list
-    #
-    # Excluded intentionally:
-    #   amcl        -- slam_toolbox owns localization
-    #   map_server  -- slam_toolbox publishes /map
-    #   route_server -- not used
-    #   docking_server -- not used
-    # -------------------------------------------------------------------------
     lifecycle_manager = Node(
         package="nav2_lifecycle_manager",
         executable="lifecycle_manager",
@@ -82,28 +84,45 @@ def generate_launch_description():
     nav2_delayed = TimerAction(period=5.0, actions=[nav2, lifecycle_manager])
 
     # -------------------------------------------------------------------------
-    # Thermocator stack — delayed 10s
-    #
-    # Internal delays inside thermocator.launch.py add further staggering:
-    #   0s  -> slam_toolbox
-    #   5s  -> Nav2 + lifecycle manager
-    #  10s  -> thermal_broadcaster        (immediate inside thermocator launch)
-    #  13s  -> thermal_map_builder        (3s delay inside thermocator launch)
-    #  18s  -> decision_node              (8s delay inside thermocator launch)
+    # Thermocator stack -- delayed 10s
+    #   0s  -> cartographer
+    #   5s  -> nav2 + lifecycle manager
+    #  10s  -> thermal_broadcaster        (thermocator.launch.py t=0)
+    #  13s  -> thermal_map_builder        (thermocator.launch.py t=3)
+    #  18s  -> decision_node              (thermocator.launch.py t=8)
     # -------------------------------------------------------------------------
     thermocator = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(thermocator_launch_file),
         launch_arguments={
-            "use_sim_time": "true",
+            "use_sim_time": use_sim_time,
         }.items(),
     )
 
     thermocator_delayed = TimerAction(period=10.0, actions=[thermocator])
 
+    # -------------------------------------------------------------------------
+    # RViz2 -- pre-loaded with thermocator.rviz if it exists
+    # Falls back to blank RViz2 if the config has not been saved yet
+    # Disable with use_rviz:=false
+    # -------------------------------------------------------------------------
+    rviz_args = ["-d", rviz_config_file] if os.path.isfile(rviz_config_file) else []
+
+    rviz = Node(
+        package="rviz2",
+        executable="rviz2",
+        name="rviz2",
+        output="screen",
+        arguments=rviz_args,
+        condition=IfCondition(use_rviz),
+    )
+
     return LaunchDescription(
         [
+            use_sim_time_arg,
+            use_rviz_arg,
             cartographer,
             nav2_delayed,
             thermocator_delayed,
+            rviz,
         ]
     )

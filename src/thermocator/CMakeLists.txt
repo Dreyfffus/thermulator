@@ -15,7 +15,6 @@ find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(geometry_msgs REQUIRED)
-
 find_package(rviz_common REQUIRED)
 find_package(rviz_rendering REQUIRED)
 find_package(pluginlib REQUIRED)
@@ -41,10 +40,14 @@ set(THERMOCATOR_DEPS
   visualization_msgs
 )
 
+# =============================================================================
+# decision_node
+# Phase1Explorer, Phase2Actor, ActionGrid all compiled into the same executable
+# =============================================================================
 add_executable(decision_node
-    src/decision_node.cpp
+  src/decision_node.cpp
+  src/action_grid.cpp
 )
-
 ament_target_dependencies(decision_node ${THERMOCATOR_DEPS})
 target_include_directories(decision_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -52,6 +55,9 @@ target_include_directories(decision_node PUBLIC
 )
 target_compile_features(decision_node PUBLIC cxx_std_17)
 
+# =============================================================================
+# thermocator (thermal map builder)
+# =============================================================================
 add_executable(thermocator
   src/thermocator.cpp
   src/map_builder.cpp
@@ -64,32 +70,47 @@ target_include_directories(thermocator PUBLIC
 )
 target_compile_features(thermocator PUBLIC cxx_std_17)
 
-
+# =============================================================================
+# thermal_broadcaster
+# =============================================================================
 add_executable(thermal_broadcaster
-   src/thermal_broadcaster.cpp
+  src/thermal_broadcaster.cpp
 )
 ament_target_dependencies(thermal_broadcaster ${THERMOCATOR_DEPS})
 target_include_directories(thermal_broadcaster PUBLIC
-   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
 )
 target_compile_features(thermal_broadcaster PUBLIC cxx_std_17)
 
+# =============================================================================
+# dt_mediator
+# =============================================================================
 add_executable(dt_mediator
-    src/dt_mediator.cpp
+  src/dt_mediator.cpp
 )
 ament_target_dependencies(dt_mediator ${THERMOCATOR_DEPS})
 target_compile_features(dt_mediator PUBLIC cxx_std_17)
 
+# =============================================================================
+# sync_monitor
+# =============================================================================
 add_executable(sync_monitor
-    src/sync_monitor.cpp
+  src/sync_monitor.cpp
 )
 ament_target_dependencies(sync_monitor ${THERMOCATOR_DEPS})
 target_compile_features(sync_monitor PUBLIC cxx_std_17)
 
+# =============================================================================
+# thermocator_display -- RViz2 plugin shared library
+#
+# Replaces thermal_display.cpp with occupancy_grid_overlay.cpp.
+# Registers two plugin variants: ThermalOverlay and ActionOverlay.
+# Both live in the same shared library, selected by plugin_description.xml.
+# =============================================================================
 add_library(thermocator_display SHARED
-  src/thermal_display.cpp
-  include/thermocator/thermal_display.hpp
+  src/occupancy_grid_overlay.cpp
+  include/thermocator/occupancy_grid_overlay.hpp
 )
 ament_target_dependencies(thermocator_display
   ${THERMOCATOR_DEPS}
@@ -104,19 +125,26 @@ target_include_directories(thermocator_display BEFORE PUBLIC
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
 )
 target_compile_features(thermocator_display PUBLIC cxx_std_17)
-
 target_link_libraries(thermocator_display
-    Qt5::Core
-    Qt5::Widgets
+  Qt5::Core
+  Qt5::Widgets
 )
 
-# Required for Qt MOC — RViz2 plugins use Qt signals/slots
+target_compile_options(thermocator_display PRIVATE
+  -Wno-unused-parameter
+  -Wno-pedantic
+  -Wno-extra
+)
+
+# Required for Qt MOC -- RViz2 plugins use Qt signals/slots
 set_property(TARGET thermocator_display PROPERTY AUTOMOC ON)
 
-# Register plugin with pluginlib
-pluginlib_export_plugin_description_file(
-  rviz_common plugin_description.xml)
+# Register both plugin variants with pluginlib
+pluginlib_export_plugin_description_file(rviz_common plugin_description.xml)
 
+# =============================================================================
+# Install
+# =============================================================================
 install(TARGETS
   thermocator
   thermocator_display
@@ -135,23 +163,23 @@ install(
 )
 
 install(
-    FILES plugin_description.xml
-    DESTINATION share/${PROJECT_NAME}
+  FILES plugin_description.xml
+  DESTINATION share/${PROJECT_NAME}
 )
 
 install(
-    DIRECTORY config/
-    DESTINATION share/${PROJECT_NAME}/config
+  DIRECTORY config/
+  DESTINATION share/${PROJECT_NAME}/config
 )
 
 install(
-    DIRECTORY launch/
-    DESTINATION share/${PROJECT_NAME}/launch
+  DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/launch
 )
 
 install(
-    DIRECTORY ../../docs/
-    DESTINATION share/${PROJECT_NAME}/docs
+  DIRECTORY ../../docs/
+  DESTINATION share/${PROJECT_NAME}/docs
 )
 
 if(BUILD_TESTING)

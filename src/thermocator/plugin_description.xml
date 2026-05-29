@@ -1,14 +1,29 @@
 <library path="thermocator_display">
+ 
   <class
-    name="thermocator/ThermalDisplay"
-    type="thermocator::ThermalDisplay"
+    name="thermocator/ThermalOverlay"
+    type="thermocator::ThermalOverlay"
     base_class_type="rviz_common::Display">
     <description>
-      Visualizes a thermal heat map as a color-gradient overlay.
-      Subscribes to a nav_msgs/OccupancyGrid topic published by the
-      ThermalMapBuilder node.
+      Thermal map overlay. Color-maps OccupancyGrid values 0-100 from blue (cold)
+      to red (hot). Unknown cells (-1) are fully transparent. Designed for
+      /thermal_map but works with any OccupancyGrid topic. Colors and alpha
+      are configurable per instance.
     </description>
   </class>
+ 
+  <class
+    name="thermocator/ActionOverlay"
+    type="thermocator::ActionOverlay"
+    base_class_type="rviz_common::Display">
+    <description>
+      Action zone overlay. Color-maps OccupancyGrid values 0-100 from transparent
+      (low intensity) to bright green (high intensity). Unknown cells (-1) are
+      also fully transparent. Designed for /action_map to visualize actioned zones
+      with Gaussian falloff gradients. Colors and alpha are configurable per instance.
+    </description>
+  </class>
+ 
 </library>
 <library path="thermocator_layer">
   <class

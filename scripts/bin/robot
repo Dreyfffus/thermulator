@@ -3,7 +3,7 @@
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 WS_ROOT=$(dirname "$(dirname "$SCRIPT_DIR")")
 CONFIG_DIR="${WS_ROOT}/src/thermocator/config"
-
+RVIZ_CONFIG="${CONFIG_DIR}/thermocator.rviz"
 
 service="${1:-}"
 domain_id="${2:-38}"
@@ -18,36 +18,49 @@ if [ -z "$service" ]; then
     echo "Usage: $0 <service> [domain_id] [package]"
     echo ""
     echo "Services:"
-    echo "  teleop       — keyboard teleoperation"
-    echo "  rviz         — Cartographer SLAM + RViz2"
-    echo "  lifecycle    — Lifecycle manager for Nav2 node management"
-    echo "  nav          — Nav2 with thermal costmap params"
-    echo "  thermal      — ThermalMapBuilder node"
-    echo "  broadcaster  — ThermalBroadcaster (sim sensor)"
-    echo "  decision     — DecisionNode (frontier exploration)"
-    echo "  thermocator  — Full thermocator pipeline"
-    echo "  thermulator  — Entire Thermocator + External stack"
-    echo "  map_save     — Save current map to config folder"
-    echo "  build        — Build workspace (optional: [package])"
-    echo "  sim          — Gazebo Simulation Connection and Sync"
+    echo "  teleop       -- keyboard teleoperation"
+    echo "  rviz         -- Cartographer SLAM + RViz2 with thermocator config"
+    echo "  nav          -- Nav2 navigation stack"
+    echo "  lifecycle    -- Nav2 lifecycle manager"
+    echo "  thermal      -- ThermalMapBuilder node"
+    echo "  broadcaster  -- ThermalBroadcaster (simulated sensor)"
+    echo "  decision     -- DecisionNode (frontier exploration + actioning)"
+    echo "  thermocator  -- Full thermocator pipeline (broadcaster + map builder + decision)"
+    echo "  thermulator  -- Entire stack (Cartographer + Nav2 + thermocator + RViz2)"
+    echo "  sim          -- Gazebo simulation with bridge"
+    echo "  map_save     -- Save current map to config folder"
+    echo "  build        -- Build workspace (optional: [package])"
     echo ""
-    echo "Resolved Paths:"
-    echo "  Workspace Dir : ${WS_ROOT}"
-    echo "  Config Dir    : ${CONFIG_DIR}"
+    echo "Resolved paths:"
+    echo "  Workspace : ${WS_ROOT}"
+    echo "  Config    : ${CONFIG_DIR}"
+    echo "  RViz2     : ${RVIZ_CONFIG}"
+    echo ""
     echo "domain_id defaults to 38 if not specified"
-    echo ""
     exit 1
 fi
+
+# Helper: resolve RViz2 arguments
+rviz_args() {
+    if [ -f "${RVIZ_CONFIG}" ]; then
+        echo "-d ${RVIZ_CONFIG}"
+    else
+        echo ""
+    fi
+}
 
 case "$service" in
     teleop)
         bash -c "${SETUP} && \
                  ros2 run turtlebot3_teleop teleop_keyboard"
         ;;
- 
+
     rviz)
         bash -c "${SETUP} && \
-                 ros2 launch turtlebot3_cartographer cartographer.launch.py"
+                 ros2 launch turtlebot3_cartographer cartographer.launch.py \
+                 use_rviz:=False &
+                 sleep 3
+                 ros2 run rviz2 rviz2 $(rviz_args)"
         ;;
 
     nav)
@@ -60,11 +73,8 @@ case "$service" in
 
     lifecycle)
         bash -c "${SETUP} && \
-                ros2 run nav2_lifecycle_manager lifecycle_manager \
-                --ros-args \
-                -p use_sim_time:=false \
-                -p autostart:=true \
-                -p node_names:='[\"controller_server\",\"smoother_server\",\"planner_server\",\"behavior_server\",\"velocity_smoother\",\"collision_monitor\",\"bt_navigator\",\"waypoint_follower\"]'"
+                 ros2 launch thermocator lifecycle_manager.launch.py \
+                 use_sim_time:=false"
         ;;
 
     thermal)
@@ -104,7 +114,7 @@ case "$service" in
     map_save)
         bash -c "${SETUP} && \
                  ros2 run nav2_map_server map_saver_cli \
-                 -f ~/turtlebot3_ws/src/thermocator/config/my_map"
+                 -f ${CONFIG_DIR}/my_map"
         ;;
 
     build)
@@ -112,12 +122,14 @@ case "$service" in
             echo "Building package: $package"
             bash -c "${SETUP} && \
                      cd ${WS_ROOT} && \
-                     colcon build --packages-select ${package} --symlink-install"
+                     colcon build --packages-select ${package} --symlink-install \
+                     --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
         else
             echo "Building all packages ..."
             bash -c "${SETUP} && \
                      cd ${WS_ROOT} && \
-                     colcon build --symlink-install"
+                     colcon build --symlink-install \
+                     --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
         fi
         ;;
 
@@ -127,3 +139,4 @@ case "$service" in
         exit 1
         ;;
 esac
+

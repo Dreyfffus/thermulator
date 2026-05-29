@@ -1,633 +1,778 @@
 #include "thermocator/decision_node.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
-#include <set>
+#include <queue>
+#include <rclcpp/logging.hpp>
 
 namespace thermocator {
 
-// ----------------------------------------------------------------------------
-// Constructor
-// ----------------------------------------------------------------------------
+Explorer::Explorer(NodeContext &ctx, const Params &p)
+    : sample_radius_(p.radius_initial), rng_(std::random_device{}()), ctx_(ctx), default_params_(p) {}
 
-DecisionNode::DecisionNode() : Node("decision_node") {
-
-    declare_parameter("map_frame", std::string("map"));
-    declare_parameter("robot_frame", std::string("base_footprint"));
-    declare_parameter("heat_detection_threshold", 20.0);
-    declare_parameter("frontier_min_distance", 0.8);
-    declare_parameter("scoring_radius", 1.5);
-    declare_parameter("max_frontier_distance", 1.0);
-    declare_parameter("w_boundary", 1.0);
-    declare_parameter("w_thermal_boundary", 3.0);
-    declare_parameter("w_hot_interior", 0.5);
-    declare_parameter("w_cold_interior", 2.0);
-    declare_parameter("revisit_penalty_radius", 0.8);
-    declare_parameter("max_visited_goals", 10);
-    declare_parameter("investigation_duration", 5.0);
-    declare_parameter("control_rate", 1.0);
-
-    map_frame_ = get_parameter("map_frame").as_string();
-    robot_frame_ = get_parameter("robot_frame").as_string();
-    heat_detection_threshold_ = get_parameter("heat_detection_threshold").as_double();
-    frontier_min_distance_ = get_parameter("frontier_min_distance").as_double();
-    scoring_radius_ = get_parameter("scoring_radius").as_double();
-    max_frontier_distance_ = get_parameter("max_frontier_distance").as_double();
-    w_boundary_ = get_parameter("w_boundary").as_double();
-    w_thermal_boundary_ = get_parameter("w_thermal_boundary").as_double();
-    w_hot_interior_ = get_parameter("w_hot_interior").as_double();
-    w_cold_interior_ = get_parameter("w_cold_interior").as_double();
-    revisit_penalty_radius_ = get_parameter("revisit_penalty_radius").as_double();
-    max_visited_goals_ = get_parameter("max_visited_goals").as_int();
-    investigation_duration_ = get_parameter("investigation_duration").as_double();
-    control_rate_ = get_parameter("control_rate").as_double();
-
-    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
-    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-
-    rclcpp::QoS latched_qos(1);
-    latched_qos.transient_local().reliable();
-
-    thermal_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
-        "/thermal_map", latched_qos,
-        std::bind(&DecisionNode::thermalMapCallback, this, std::placeholders::_1));
-
-    spatial_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
-        "/map", latched_qos,
-        std::bind(&DecisionNode::spatialMapCallback, this, std::placeholders::_1));
-
-    goal_marker_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
-        "/thermocator/goal_markers", rclcpp::QoS(10));
-
-    nav_client_ = rclcpp_action::create_client<nav2_msgs::action::NavigateToPose>(
-        this, "navigate_to_pose");
-
-    const auto period = std::chrono::duration<double>(1.0 / control_rate_);
-    control_timer_ = create_wall_timer(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(period),
-        std::bind(&DecisionNode::controlLoop, this));
-
-    RCLCPP_INFO(get_logger(),
-                "DecisionNode ready -- "
-                "heat_thresh: %.1f  scoring_radius: %.2fm  max_frontier_dist: %.2fm  "
-                "weights: boundary=%.2f  thermal_boundary=%.2f  "
-                "hot_interior=%.2f  cold_interior=%.2f",
-                heat_detection_threshold_, scoring_radius_, max_frontier_distance_,
-                w_boundary_, w_thermal_boundary_,
-                w_hot_interior_, w_cold_interior_);
-}
-
-// ----------------------------------------------------------------------------
-// Map callbacks
-// ----------------------------------------------------------------------------
-
-void DecisionNode::thermalMapCallback(
-    const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
-    std::lock_guard<std::mutex> lock(map_mutex_);
-    thermal_map_ = msg;
-    thermal_map_received_ = true;
-}
-
-void DecisionNode::spatialMapCallback(
-    const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
-    std::lock_guard<std::mutex> lock(map_mutex_);
-    spatial_map_ = msg;
-    spatial_map_received_ = true;
-}
-
-// ----------------------------------------------------------------------------
-// State machine
-// ----------------------------------------------------------------------------
-
-void DecisionNode::controlLoop() {
+bool Explorer::update() {
+    if (complete_)
+        return true;
     switch (state_) {
-    case ExplorationState::IDLE:
-        handleIdle();
-        break;
-    case ExplorationState::SCANNING:
+    case State::SCANNING:
         handleScanning();
         break;
-    case ExplorationState::NAVIGATING:
+    case State::NAVIGATING:
         handleNavigating();
         break;
-    case ExplorationState::INVESTIGATING:
-        handleInvestigating();
-        break;
-    case ExplorationState::COMPLETE:
-        handleComplete();
-        break;
     }
+    return complete_;
 }
 
-void DecisionNode::handleIdle() {
-    if (!thermal_map_received_) {
-        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
-                             "Waiting for /thermal_map ...");
-        return;
-    }
-    if (!spatial_map_received_) {
-        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
-                             "Waiting for /map ...");
-        return;
-    }
-    if (!nav_client_->wait_for_action_server(std::chrono::seconds(1))) {
-        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
-                             "Waiting for Nav2 action server ...");
-        return;
-    }
-    RCLCPP_INFO(get_logger(), "All systems ready -- starting exploration");
-    state_ = ExplorationState::SCANNING;
-}
-
-void DecisionNode::handleScanning() {
-    const auto pose = getRobotPose();
-    if (!pose.has_value()) {
-        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-                             "Cannot get robot pose -- skipping scan");
-        return;
-    }
-
-    nav_msgs::msg::OccupancyGrid::SharedPtr thermal_copy;
-    nav_msgs::msg::OccupancyGrid::SharedPtr spatial_copy;
-    {
-        std::lock_guard<std::mutex> lock(map_mutex_);
-        thermal_copy = thermal_map_;
-        spatial_copy = spatial_map_;
-    }
-
-    // Debug map state
-    int spatial_free = 0, spatial_unknown = 0, spatial_occupied = 0;
-    for (const auto &v : spatial_copy->data) {
-        if (v >= 0 && v <= 50)
-            ++spatial_free;
-        else if (v == -1)
-            ++spatial_unknown;
-        else
-            ++spatial_occupied;
-    }
-    int thermal_hot = 0, thermal_cold = 0, thermal_unknown = 0;
-    const auto thresh = static_cast<int8_t>(heat_detection_threshold_);
-    for (const auto &v : thermal_copy->data) {
-        if (v >= thresh)
-            ++thermal_hot;
-        else if (v == -1)
-            ++thermal_unknown;
-        else if (v >= 0)
-            ++thermal_cold;
-    }
-    RCLCPP_INFO(get_logger(),
-                "Map state -- spatial: free=%d unknown=%d occupied=%d | "
-                "thermal: hot=%d cold=%d unknown=%d",
-                spatial_free, spatial_unknown, spatial_occupied,
-                thermal_hot, thermal_cold, thermal_unknown);
-
-    std::vector<Frontier> frontiers;
-
-    if (hasHeatData(*thermal_copy)) {
-        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
-                             "Phase 2 -- thermal boundary mapping mode");
-        frontiers = detectThermalFrontiers(
-            *spatial_copy, *thermal_copy, pose->first, pose->second);
-
-        if (frontiers.empty()) {
-            RCLCPP_INFO(get_logger(),
-                        "No thermal frontiers -- falling back to spatial exploration");
-            frontiers = detectSpatialFrontiers(
-                *spatial_copy, pose->first, pose->second);
-        }
-    } else {
-        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
-                             "Phase 1 -- spatial exploration mode");
-        frontiers = detectSpatialFrontiers(
-            *spatial_copy, pose->first, pose->second);
-    }
-
-    if (frontiers.empty()) {
-        RCLCPP_INFO(get_logger(), "No frontiers found -- exploration complete");
-        complete_start_ = std::chrono::steady_clock::now();
-        state_ = ExplorationState::COMPLETE;
-        return;
-    }
-
-    const auto best = selectBestFrontier(frontiers);
-
-    RCLCPP_INFO(get_logger(),
-                "Goal: (%.2f, %.2f)  score=%.3f  "
-                "boundary=%.2f  thermal_bonus=%.2f  "
-                "hot_interior=%.2f  cold_interior=%.2f  revisit=%.2f",
-                best.world_x, best.world_y, best.final_score,
-                best.boundary_score, best.thermal_bonus,
-                best.hot_interior, best.cold_interior, best.revisit_penalty);
-
-    current_goal_x_ = best.world_x;
-    current_goal_y_ = best.world_y;
-    goal_active_ = false;
-    goal_succeeded_ = false;
-    goal_failed_ = false;
-
-    // Record visited goal
-    visited_goals_.push_back({best.world_x, best.world_y});
-    if (static_cast<int>(visited_goals_.size()) > max_visited_goals_)
-        visited_goals_.pop_front();
-
-    sendGoal(best.world_x, best.world_y);
-    state_ = ExplorationState::NAVIGATING;
-}
-
-void DecisionNode::handleNavigating() {
-    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 3000,
-                         "NAVIGATING -- active=%d succeeded=%d failed=%d",
-                         goal_active_.load(), goal_succeeded_.load(), goal_failed_.load());
-
-    if (goal_failed_) {
-        RCLCPP_WARN(get_logger(), "Goal failed -- returning to scanning");
-        goal_failed_ = false;
-        state_ = ExplorationState::SCANNING;
-        return;
-    }
-    if (goal_succeeded_) {
-        RCLCPP_INFO(get_logger(),
-                    "Reached goal -- investigating for %.1fs", investigation_duration_);
-        investigation_start_ = std::chrono::steady_clock::now();
-        goal_succeeded_ = false;
-        state_ = ExplorationState::INVESTIGATING;
-    }
-}
-
-void DecisionNode::handleInvestigating() {
-    // Steady clock avoids sim time source mismatch crash
-    const double elapsed = std::chrono::duration<double>(
-                               std::chrono::steady_clock::now() - investigation_start_)
-                               .count();
-
-    if (elapsed >= investigation_duration_) {
-        RCLCPP_INFO(get_logger(), "Investigation done -- rescanning");
-        state_ = ExplorationState::SCANNING;
-    }
-}
-
-void DecisionNode::handleComplete() {
-    // Only recheck every 10 seconds to avoid tight loop
-    const double elapsed = std::chrono::duration<double>(
-                               std::chrono::steady_clock::now() - complete_start_)
-                               .count();
-
-    if (elapsed < 10.0) {
-        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 10000,
-                             "Exploration complete -- monitoring for new frontiers");
-        return;
-    }
-    complete_start_ = std::chrono::steady_clock::now();
-
-    nav_msgs::msg::OccupancyGrid::SharedPtr spatial_copy;
-    {
-        std::lock_guard<std::mutex> lock(map_mutex_);
-        if (!spatial_map_)
-            return;
-        spatial_copy = spatial_map_;
-    }
-
+void Explorer::handleScanning() {
     const auto pose = getRobotPose();
     if (!pose.has_value())
         return;
 
-    const auto frontiers = detectSpatialFrontiers(
-        *spatial_copy, pose->first, pose->second);
+    nav_msgs::msg::OccupancyGrid::SharedPtr costmap_copy;
+    nav_msgs::msg::OccupancyGrid::SharedPtr thermal_copy;
+    nav_msgs::msg::OccupancyGrid::SharedPtr spatial_copy;
+    {
+        std::lock_guard<std::mutex> lk(*ctx_.map_mutex);
+        costmap_copy = ctx_.costmap;
+        thermal_copy = ctx_.thermal_map;
+        spatial_copy = ctx_.spatial_map;
+    }
+    if (!costmap_copy || !thermal_copy || !spatial_copy)
+        return;
 
-    if (!frontiers.empty()) {
-        RCLCPP_INFO(get_logger(), "New frontiers detected -- resuming");
-        state_ = ExplorationState::SCANNING;
+    const double cov = computeCoverageRatio(*spatial_copy, *thermal_copy);
+    RCLCPP_INFO_THROTTLE(ctx_.logger, *ctx_.clock, 3000,
+                         "[Explorer] Coverage %.1f%%  sample_r=%.1fm",
+                         cov * 100.0, sample_radius_);
+
+    if (cov >= default_params_.coverage_threshold) {
+        RCLCPP_INFO(ctx_.logger, "[Explorer] Coverage complete");
+        complete_ = true;
+        return;
+    }
+
+    auto ft = detectTargets(
+        *thermal_copy, *costmap_copy,
+        pose->first, pose->second);
+
+    if (!ft.empty()) {
+        const auto best = chooseTarget(
+            ft, *costmap_copy, *thermal_copy, pose->first, pose->second);
+
+        RCLCPP_INFO(ctx_.logger,
+                    "[Explorer] Frontier (%.2f,%.2f) "
+                    "cg=%.0f d=%.2f r=%.1f",
+                    best.world_x, best.world_y,
+                    best.corridor_gain, best.distance, sample_radius_);
+
+        ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
+        _current_goal_x = best.world_x;
+        _current_goal_y = best.world_y;
+        publishGoalMarker();
+        sendGoal(best.world_x, best.world_y);
+        state_ = State::NAVIGATING;
+        return;
+    }
+
+    sample_radius_ = std::min(
+        sample_radius_ + default_params_.radius_step,
+        default_params_.radius_max);
+
+    RCLCPP_INFO_THROTTLE(ctx_.logger, *ctx_.clock, 2000,
+                         "[Explorer] No targets -- radius -> %.1fm",
+                         sample_radius_);
+
+    if (sample_radius_ >= default_params_.radius_max) {
+        RCLCPP_INFO(ctx_.logger,
+                    "[Explorer] Radius maxed -- coverage %.1f%% -- done",
+                    cov * 100.0);
+        complete_ = true;
     }
 }
 
-// ----------------------------------------------------------------------------
-// Phase detection
-// ----------------------------------------------------------------------------
+void Explorer::handleNavigating() {
+    checkTimeout();
 
-bool DecisionNode::hasHeatData(
-    const nav_msgs::msg::OccupancyGrid &thermal) const {
-    const auto thresh = static_cast<int8_t>(heat_detection_threshold_);
-    for (const auto &v : thermal.data) {
-        if (v >= thresh)
-            return true;
+    if (ctx_.goal_failed) {
+        ctx_.goal_failed = false;
+        RCLCPP_WARN(ctx_.logger, "[Explorer] Goal failed (%.2f,%.2f)",
+                    _current_goal_x, _current_goal_y);
+        ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
+        state_ = State::SCANNING;
+        return;
     }
-    return false;
+
+    if (ctx_.goal_succeeded) {
+        ctx_.goal_succeeded = false;
+        ctx_.goal_active = false;
+        state_ = State::SCANNING;
+        return;
+    }
+
+    const double elapsed = std::chrono::duration<double>(
+                               std::chrono::steady_clock::now() - ctx_.goal_sent_time)
+                               .count();
+    if (elapsed > default_params_.rescan_interval_seconds) {
+        RCLCPP_INFO(ctx_.logger, "[Explorer] Rescan interval -- re-evaluating");
+        ctx_.nav_client->async_cancel_all_goals();
+        ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
+        state_ = State::SCANNING;
+    }
 }
 
-// ----------------------------------------------------------------------------
-// Phase 1 -- spatial frontiers
-// Free cells (0-50) adjacent to unknown cells (-1), scored by proximity
-// ----------------------------------------------------------------------------
-
-std::vector<Frontier> DecisionNode::detectSpatialFrontiers(
-    const nav_msgs::msg::OccupancyGrid &spatial,
-    double robot_x, double robot_y) const {
-    std::vector<Frontier> frontiers;
-    const auto &info = spatial.info;
-    const int nb[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-
-    for (uint32_t row = 1; row < info.height - 1; ++row) {
-        for (uint32_t col = 1; col < info.width - 1; ++col) {
-
-            const size_t idx = static_cast<size_t>(row) * info.width + col;
-
-            // Cartographer free cells are in range 0-50
-            if (spatial.data[idx] < 0 || spatial.data[idx] > 50)
-                continue;
-
-            bool adj_unknown = false;
-            for (const auto &n : nb) {
-                const size_t nidx =
-                    static_cast<size_t>(row + n[0]) * info.width + (col + n[1]);
-                if (spatial.data[nidx] == -1) {
-                    adj_unknown = true;
-                    break;
-                }
-            }
-            if (!adj_unknown)
-                continue;
-
-            const double wx =
-                info.origin.position.x + (col + 0.5) * info.resolution;
-            const double wy =
-                info.origin.position.y + (row + 0.5) * info.resolution;
-            const double dx = wx - robot_x;
-            const double dy = wy - robot_y;
-            const double dist = std::sqrt(dx * dx + dy * dy);
-
-            if (dist < frontier_min_distance_)
-                continue;
-
-            Frontier f;
-            f.world_x = wx;
-            f.world_y = wy;
-            f.distance = dist;
-            f.final_score = 1.0 / (dist + 1e-6);
-            frontiers.push_back(f);
-        }
-    }
-    return frontiers;
-}
-
-// ----------------------------------------------------------------------------
-// Phase 2 -- thermal boundary frontiers
-//
-// Scoring strategy:
-//   + boundary_score:   unknown cells sitting on the known/unknown edge
-//   + thermal_bonus:    boundary cells adjacent to hot cells
-//   - hot_interior:     known hot cells (mild penalty -- less interesting now)
-//   - cold_interior:    known cold cells (strong penalty -- nothing new here)
-//   - revisit_penalty:  proximity to recently visited goal positions
-//
-// Hard constraint:
-//   Candidates with no known neighbor within max_frontier_distance_ are
-//   discarded -- robot never ventures too far from explored space
-// ----------------------------------------------------------------------------
-
-std::vector<Frontier> DecisionNode::detectThermalFrontiers(
-    const nav_msgs::msg::OccupancyGrid &spatial,
+std::vector<Frontier> Explorer::detectTargets(
     const nav_msgs::msg::OccupancyGrid &thermal,
-    double robot_x, double robot_y) const {
-    std::vector<Frontier> frontiers;
-    const auto &si = spatial.info;
+    const nav_msgs::msg::OccupancyGrid &costmap,
+    double rx, double ry) const {
+    const auto &ci = costmap.info;
     const auto &ti = thermal.info;
-    const auto thresh = static_cast<int8_t>(heat_detection_threshold_);
-    const int anb[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-    const int scan = static_cast<int>(scoring_radius_ / ti.resolution);
 
-    for (uint32_t row = 1; row < si.height - 1; ++row) {
-        for (uint32_t col = 1; col < si.width - 1; ++col) {
+    std::uniform_real_distribution<double> uniform(-sample_radius_, sample_radius_);
 
-            const size_t sidx = static_cast<size_t>(row) * si.width + col;
+    std::vector<Frontier> valid;
+    valid.reserve(default_params_.samples_per_cycle);
 
-            // Must be spatially free (Cartographer range 0-50)
-            if (spatial.data[sidx] < 0 || spatial.data[sidx] > 50)
-                continue;
+    const int max_attempts = default_params_.samples_per_cycle * 4;
 
-            const double wx =
-                si.origin.position.x + (col + 0.5) * si.resolution;
-            const double wy =
-                si.origin.position.y + (row + 0.5) * si.resolution;
-            const double dx = wx - robot_x;
-            const double dy = wy - robot_y;
-            const double dist = std::sqrt(dx * dx + dy * dy);
+    for (int attempt = 0; attempt < max_attempts && (int)valid.size() < default_params_.samples_per_cycle; ++attempt) {
 
-            if (dist < frontier_min_distance_)
-                continue;
+        const double ox = uniform(rng_);
+        const double oy = uniform(rng_);
+        const double d2 = ox * ox + oy * oy;
+        if (d2 > sample_radius_ * sample_radius_)
+            continue;
 
-            // Locate candidate in thermal grid
-            const int tc = static_cast<int>(
-                (wx - ti.origin.position.x) / ti.resolution);
-            const int tr = static_cast<int>(
-                (wy - ti.origin.position.y) / ti.resolution);
+        const double dist = std::sqrt(d2);
+        if (dist < default_params_.goal_min_distance)
+            continue;
 
-            if (tc < 0 || tc >= static_cast<int>(ti.width) ||
-                tr < 0 || tr >= static_cast<int>(ti.height))
-                continue;
+        const double wx = rx + ox;
+        const double wy = ry + oy;
 
-            double boundary_score = 0.0;
-            double thermal_bonus = 0.0;
-            double hot_interior = 0.0;
-            double cold_interior = 0.0;
-            double min_known_dist = std::numeric_limits<double>::max();
+        const int cc = static_cast<int>((wx - ci.origin.position.x) / ci.resolution);
+        const int cr = static_cast<int>((wy - ci.origin.position.y) / ci.resolution);
+        if (cc < 0 || cc >= (int)ci.width || cr < 0 || cr >= (int)ci.height)
+            continue;
+        const auto cv = costmap.data[static_cast<size_t>(cr) * ci.width + cc];
+        if (cv < 0 || cv >= 99)
+            continue;
 
-            for (int dr = -scan; dr <= scan; ++dr) {
-                for (int dc = -scan; dc <= scan; ++dc) {
-                    const int nr = tr + dr;
-                    const int nc = tc + dc;
-
-                    if (nr < 0 || nr >= static_cast<int>(ti.height) ||
-                        nc < 0 || nc >= static_cast<int>(ti.width))
-                        continue;
-
-                    const float cell_dist =
-                        std::sqrt(static_cast<float>(dr * dr + dc * dc)) *
-                        ti.resolution;
-                    if (cell_dist > scoring_radius_)
-                        continue;
-
-                    const size_t tidx =
-                        static_cast<size_t>(nr) * ti.width + nc;
-                    const int8_t tv = thermal.data[tidx];
-
-                    if (tv == -1) {
-                        // Unknown cell -- reward if it sits on the boundary
-                        for (const auto &n : anb) {
-                            const int ar = nr + n[0];
-                            const int ac = nc + n[1];
-                            if (ar < 0 || ar >= static_cast<int>(ti.height) ||
-                                ac < 0 || ac >= static_cast<int>(ti.width))
-                                continue;
-                            const size_t aidx =
-                                static_cast<size_t>(ar) * ti.width + ac;
-                            const int8_t av = thermal.data[aidx];
-                            if (av >= 0) {
-                                // Known neighbor -- this unknown is on the boundary
-                                boundary_score += 1.0 / (cell_dist + 1e-3);
-                                if (av >= thresh) {
-                                    // Hot known neighbor -- thermal bonus
-                                    thermal_bonus +=
-                                        static_cast<double>(av) / 100.0 /
-                                        (cell_dist + 1e-3);
-                                }
-                                break;
-                            }
-                        }
-                    } else if (tv >= thresh) {
-                        // Known hot cell -- mild interior penalty
-                        hot_interior += 1.0 / (cell_dist + 1e-3);
-                        min_known_dist = std::min(
-                            min_known_dist, static_cast<double>(cell_dist));
-                    } else if (tv >= 0) {
-                        // Known cold cell -- strong interior penalty
-                        cold_interior += 1.0 / (cell_dist + 1e-3);
-                        min_known_dist = std::min(
-                            min_known_dist, static_cast<double>(cell_dist));
-                    }
-                }
-            }
-
-            // Hard constraint -- discard candidates too far from explored space
-            if (min_known_dist > max_frontier_distance_)
-                continue;
-
-            // Revisit suppression
-            double revisit_penalty = 0.0;
-            for (const auto &vg : visited_goals_) {
-                const double vdx = wx - vg.first;
-                const double vdy = wy - vg.second;
-                const double vd = std::sqrt(vdx * vdx + vdy * vdy);
-                if (vd < revisit_penalty_radius_) {
-                    revisit_penalty += (1.0 - vd / revisit_penalty_radius_);
-                }
-            }
-
-            const double score =
-                w_boundary_ * boundary_score + w_thermal_boundary_ * thermal_bonus - w_hot_interior_ * hot_interior - w_cold_interior_ * cold_interior - w_cold_interior_ * revisit_penalty;
-
-            Frontier f;
-            f.world_x = wx;
-            f.world_y = wy;
-            f.distance = dist;
-            f.boundary_score = boundary_score;
-            f.thermal_bonus = thermal_bonus;
-            f.hot_interior = hot_interior;
-            f.cold_interior = cold_interior;
-            f.revisit_penalty = revisit_penalty;
-            f.final_score = score;
-            frontiers.push_back(f);
+        const int tc = static_cast<int>((wx - ti.origin.position.x) / ti.resolution);
+        const int tr = static_cast<int>((wy - ti.origin.position.y) / ti.resolution);
+        if (tc < 0 || tc >= (int)ti.width || tr < 0 || tr >= (int)ti.height) {
+            valid.push_back({wx, wy, 0.0, 0.0, dist});
+            continue;
         }
+        if (thermal.data[static_cast<size_t>(tr) * ti.width + tc] == -1)
+            valid.push_back({wx, wy, 0.0, 0.0, dist});
     }
-    return frontiers;
+
+    return valid;
 }
 
-// ----------------------------------------------------------------------------
-// Selection
-// ----------------------------------------------------------------------------
+Frontier Explorer::chooseTarget(
+    std::vector<Frontier> &candidates,
+    const nav_msgs::msg::OccupancyGrid &costmap,
+    const nav_msgs::msg::OccupancyGrid &thermal,
+    double rx, double ry) const {
+    for (auto &f : candidates)
+        f.corridor_gain = estimateGain(costmap, thermal, rx, ry, f.world_x, f.world_y);
 
-Frontier DecisionNode::selectBestFrontier(
-    std::vector<Frontier> &frontiers) const {
     return *std::max_element(
-        frontiers.begin(), frontiers.end(),
+        candidates.begin(), candidates.end(),
         [](const Frontier &a, const Frontier &b) {
-            return a.final_score < b.final_score;
+            return a.corridor_gain < b.corridor_gain;
         });
 }
 
-// ----------------------------------------------------------------------------
-// Navigation
-// ----------------------------------------------------------------------------
+double Explorer::computeCoverageRatio(
+    const nav_msgs::msg::OccupancyGrid &spatial,
+    const nav_msgs::msg::OccupancyGrid &thermal) const {
+    const auto &si = spatial.info;
+    const auto &ti = thermal.info;
+    int total = 0, covered = 0;
 
-void DecisionNode::sendGoal(double x, double y) {
-    // Pull goal slightly toward robot to avoid inflation zone boundaries
+    for (uint32_t row = 0; row < si.height; ++row) {
+        for (uint32_t col = 0; col < si.width; ++col) {
+            if (spatial.data[static_cast<size_t>(row) * si.width + col] != 0)
+                continue;
+            ++total;
+
+            const double wx = si.origin.position.x + (col + 0.5) * si.resolution;
+            const double wy = si.origin.position.y + (row + 0.5) * si.resolution;
+            const int tc = static_cast<int>((wx - ti.origin.position.x) / ti.resolution);
+            const int tr = static_cast<int>((wy - ti.origin.position.y) / ti.resolution);
+            if (tc < 0 || tc >= (int)ti.width || tr < 0 || tr >= (int)ti.height)
+                continue;
+            if (thermal.data[static_cast<size_t>(tr) * ti.width + tc] >= 0)
+                ++covered;
+        }
+    }
+    return total == 0 ? 0.0 : static_cast<double>(covered) / total;
+}
+
+double Explorer::estimateGain(
+    const nav_msgs::msg::OccupancyGrid &costmap,
+    const nav_msgs::msg::OccupancyGrid &thermal,
+    double rx, double ry, double gx, double gy) const {
+    const auto &ci = costmap.info;
+    const auto &ti = thermal.info;
+    const double dx = gx - rx, dy = gy - ry;
+    const double dist = std::sqrt(dx * dx + dy * dy);
+    if (dist < 1e-6)
+        return 0.0;
+
+    const double res = ci.resolution;
+    const int steps = std::max(1, static_cast<int>(dist / res));
+    const int r_cells = static_cast<int>(
+                            default_params_.sensor_coverage_radius / res) +
+                        1;
+
+    std::vector<bool> counted(static_cast<size_t>(ci.width) * ci.height, false);
+    double gain = 0.0;
+
+    for (int step = 0; step <= steps; ++step) {
+        const double t = static_cast<double>(step) / steps;
+        const double wx = rx + t * dx;
+        const double wy = ry + t * dy;
+        const int cx = static_cast<int>((wx - ci.origin.position.x) / res);
+        const int cy = static_cast<int>((wy - ci.origin.position.y) / res);
+
+        for (int dr = -r_cells; dr <= r_cells; ++dr) {
+            for (int dc = -r_cells; dc <= r_cells; ++dc) {
+                if (dr * dr + dc * dc > r_cells * r_cells)
+                    continue;
+                const int nr = cy + dr, nc = cx + dc;
+                if (nr < 0 || nr >= (int)ci.height ||
+                    nc < 0 || nc >= (int)ci.width)
+                    continue;
+                const size_t cidx = static_cast<size_t>(nr) * ci.width + nc;
+                if (counted[cidx])
+                    continue;
+                if (costmap.data[cidx] < 0 || costmap.data[cidx] >= 99)
+                    continue;
+
+                const double cwx = ci.origin.position.x + (nc + 0.5) * res;
+                const double cwy = ci.origin.position.y + (nr + 0.5) * res;
+                const int tc = static_cast<int>((cwx - ti.origin.position.x) / ti.resolution);
+                const int tr = static_cast<int>((cwy - ti.origin.position.y) / ti.resolution);
+                if (tc < 0 || tc >= (int)ti.width || tr < 0 || tr >= (int)ti.height) {
+                    counted[cidx] = true;
+                    gain += 1.0;
+                    continue;
+                }
+                if (thermal.data[static_cast<size_t>(tr) * ti.width + tc] == -1) {
+                    counted[cidx] = true;
+                    gain += 1.0;
+                }
+            }
+        }
+    }
+    return gain;
+}
+
+void Explorer::sendGoal(double x, double y) {
+    _current_goal_x = x;
+    _current_goal_y = y;
+    nav2_msgs::action::NavigateToPose::Goal goal;
+    goal.pose.header.stamp = ctx_.clock->now();
+    goal.pose.header.frame_id = ctx_.map_frame;
+    goal.pose.pose.position.x = x;
+    goal.pose.pose.position.y = y;
+    goal.pose.pose.orientation.w = 1.0;
+    ctx_.nav_client->async_send_goal(goal, ctx_.send_goal_options);
+    ctx_.goal_active = true;
+    ctx_.goal_sent_time = std::chrono::steady_clock::now();
+    RCLCPP_INFO(ctx_.logger, "[Explorer] Goal -> (%.2f,%.2f)", x, y);
+}
+
+void Explorer::checkTimeout() {
+    if (!ctx_.goal_active)
+        return;
+    const double e = std::chrono::duration<double>(
+                         std::chrono::steady_clock::now() - ctx_.goal_sent_time)
+                         .count();
+    if (e > default_params_.goal_timeout_seconds) {
+        RCLCPP_WARN(ctx_.logger, "[Explorer] Timeout %.1fs", e);
+        ctx_.nav_client->async_cancel_all_goals();
+        ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
+        state_ = State::SCANNING;
+    }
+}
+
+void Explorer::publishGoalMarker() {
+    visualization_msgs::msg::MarkerArray ma;
+    visualization_msgs::msg::Marker m;
+    m.header.stamp = ctx_.clock->now();
+    m.header.frame_id = ctx_.map_frame;
+    m.ns = "visited_frontiers";
+    m.id = ctx_.marker_id++;
+    m.type = visualization_msgs::msg::Marker::SPHERE;
+    m.action = visualization_msgs::msg::Marker::ADD;
+    m.pose.position.x = _current_goal_x;
+    m.pose.position.y = _current_goal_y;
+    m.pose.position.z = 0.05;
+    m.pose.orientation.w = 1.0;
+    m.scale.x = m.scale.y = m.scale.z = 0.12;
+    m.color.r = 0.0f;
+    m.color.g = 1.0f;
+    m.color.b = 0.0f;
+    m.color.a = 0.8f;
+    m.lifetime = rclcpp::Duration::from_seconds(0);
+    ma.markers.push_back(m);
+    ctx_.goal_marker_pub->publish(ma);
+}
+
+std::optional<std::pair<double, double>> Explorer::getRobotPose() const {
+    try {
+        const auto t = ctx_.tf_buffer->lookupTransform(
+            ctx_.map_frame, ctx_.robot_frame,
+            rclcpp::Time(0), rclcpp::Duration::from_seconds(0.1));
+        return std::make_pair(
+            t.transform.translation.x, t.transform.translation.y);
+    } catch (const tf2::TransformException &e) {
+        RCLCPP_WARN_THROTTLE(ctx_.logger, *ctx_.clock, 2000,
+                             "[Explorer] TF: %s", e.what());
+        return std::nullopt;
+    }
+}
+Actor::Actor(NodeContext &ctx, const Params &p)
+    : ctx_(ctx), params_(p) {}
+
+bool Actor::update() {
+    if (complete_)
+        return true;
+    switch (state_) {
+    case State::PLANNING:
+        handlePlanning();
+        break;
+    case State::NAVIGATING:
+        handleNavigating();
+        break;
+    case State::ACTIONING:
+        handleActioning();
+        break;
+    }
+    return complete_;
+}
+
+void Actor::handlePlanning() {
+    nav_msgs::msg::OccupancyGrid::SharedPtr thermal_copy;
+    {
+        std::lock_guard<std::mutex> lk(*ctx_.map_mutex);
+        thermal_copy = ctx_.thermal_map;
+    }
+    if (!thermal_copy)
+        return;
+
+    zones_ = clusterHotSpots(*thermal_copy);
+    if (zones_.empty()) {
+        RCLCPP_WARN(ctx_.logger, "[Actor] No hot spots -- done");
+        complete_ = true;
+        return;
+    }
+
+    action_grid_.Initialize(*thermal_copy);
+
+    const auto pose = getRobotPose();
+    route_ = planRoute(zones_,
+                       pose.has_value() ? pose->first : 0.0,
+                       pose.has_value() ? pose->second : 0.0);
+    current_idx_ = 0;
+
+    RCLCPP_INFO(ctx_.logger, "[Actor] %zu zones", zones_.size());
+    ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
+
+    state_ = State::NAVIGATING;
+}
+
+void Actor::handleNavigating() {
+    if (current_idx_ >= route_.size()) {
+        complete_ = true;
+        return;
+    }
+
+    if (ctx_.goal_failed) {
+        ctx_.goal_failed = false;
+        RCLCPP_WARN(ctx_.logger, "[Actor] Zone %zu failed -- skipping",
+                    current_idx_ + 1);
+        ++current_idx_;
+        ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
+        if (current_idx_ < route_.size()) {
+            const auto &z = zones_[route_[current_idx_]];
+            sendGoal(z.world_x, z.world_y);
+        }
+        return;
+    }
+
+    if (ctx_.goal_succeeded) {
+        ctx_.goal_succeeded = false;
+        action_start_ = std::chrono::steady_clock::now();
+        state_ = State::ACTIONING;
+        return;
+    }
+
+    if (!ctx_.goal_active) {
+        const auto &z = zones_[route_[current_idx_]];
+        publishZoneMarker(z, static_cast<int>(current_idx_));
+        sendGoal(z.world_x, z.world_y);
+    }
+}
+
+void Actor::handleActioning() {
+    const double e = std::chrono::duration<double>(
+                         std::chrono::steady_clock::now() - action_start_)
+                         .count();
+    if (e < params_.action_delay)
+        return;
+
+    const auto &zone = zones_[route_[current_idx_]];
+    publishActionMap(zone);
+
+    RCLCPP_INFO(ctx_.logger, "[Actor] Zone %zu actioned", current_idx_ + 1);
+    ++current_idx_;
+    ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
+    state_ = State::NAVIGATING;
+}
+
+std::vector<Actor::ActionZone> Actor::clusterHotSpots(
+    const nav_msgs::msg::OccupancyGrid &thermal) const {
+    const auto &ti = thermal.info;
+    const auto thresh = static_cast<int8_t>(params_.heat_threshold);
+    const int cr = static_cast<int>(
+        params_.cluster_radius / ti.resolution);
+
+    struct HotCell {
+        int row, col;
+        int8_t value;
+    };
+    std::vector<HotCell> hot;
+    hot.reserve(1024);
+
+    for (uint32_t row = 0; row < ti.height; ++row)
+        for (uint32_t col = 0; col < ti.width; ++col) {
+            const auto v =
+                thermal.data[static_cast<size_t>(row) * ti.width + col];
+            if (v >= thresh)
+                hot.push_back({(int)row, (int)col, v});
+        }
+
+    if (hot.empty())
+        return {};
+
+    std::sort(hot.begin(), hot.end(),
+              [](const HotCell &a, const HotCell &b) { return a.value > b.value; });
+
+    std::vector<bool> assigned(hot.size(), false);
+    std::vector<ActionZone> zones;
+
+    for (size_t i = 0; i < hot.size(); ++i) {
+        if (assigned[i])
+            continue;
+        double sx = 0, sy = 0, sh = 0;
+        int cnt = 0;
+        for (size_t j = i; j < hot.size(); ++j) {
+            if (assigned[j])
+                continue;
+            const int dr = hot[j].row - hot[i].row;
+            const int dc = hot[j].col - hot[i].col;
+            if (std::abs(dr) > cr || std::abs(dc) > cr)
+                continue;
+            if (std::sqrt((double)(dr * dr + dc * dc)) * ti.resolution >
+                params_.cluster_radius)
+                continue;
+            assigned[j] = true;
+            sx += ti.origin.position.x + (hot[j].col + 0.5) * ti.resolution;
+            sy += ti.origin.position.y + (hot[j].row + 0.5) * ti.resolution;
+            sh += hot[j].value;
+            ++cnt;
+        }
+        zones.push_back({sx / cnt, sy / cnt, sh / cnt});
+    }
+    return zones;
+}
+
+std::vector<size_t> Actor::planRoute(
+    const std::vector<ActionZone> &zones,
+    double rx, double ry) const {
+    std::vector<size_t> route;
+    std::vector<bool> visited(zones.size(), false);
+    double cx = rx, cy = ry;
+    for (size_t step = 0; step < zones.size(); ++step) {
+        double best = std::numeric_limits<double>::max();
+        size_t bidx = 0;
+        for (size_t i = 0; i < zones.size(); ++i) {
+            if (visited[i])
+                continue;
+            const double dx = zones[i].world_x - cx;
+            const double dy = zones[i].world_y - cy;
+            const double d = dx * dx + dy * dy;
+            if (d < best) {
+                best = d;
+                bidx = i;
+            }
+        }
+        visited[bidx] = true;
+        route.push_back(bidx);
+        cx = zones[bidx].world_x;
+        cy = zones[bidx].world_y;
+    }
+    return route;
+}
+
+void Actor::publishZoneMarker(const ActionZone &zone, int id) {
+    visualization_msgs::msg::MarkerArray ma;
+    visualization_msgs::msg::Marker m;
+    m.header.stamp = ctx_.clock->now();
+    m.header.frame_id = ctx_.map_frame;
+    m.ns = "action_zones";
+    m.id = id;
+    m.type = visualization_msgs::msg::Marker::SPHERE;
+    m.action = visualization_msgs::msg::Marker::ADD;
+    m.pose.position.x = zone.world_x;
+    m.pose.position.y = zone.world_y;
+    m.pose.position.z = 0.15;
+    m.pose.orientation.w = 1.0;
+    const double sz = 0.15 + (zone.strength / 100.0) * 0.25;
+    m.scale.x = m.scale.y = m.scale.z = sz;
+    m.color.r = 0.0f;
+    m.color.g = 1.0f;
+    m.color.b = 0.3f;
+    m.color.a = 0.9f;
+    m.lifetime = rclcpp::Duration::from_seconds(0);
+    ma.markers.push_back(m);
+    ctx_.zone_marker_pub->publish(ma);
+}
+
+void Actor::publishActionMap(const ActionZone &zone) {
+    action_grid_.WriteZone(
+        zone.world_x, zone.world_y,
+        zone.strength, params_.base_sigma);
+    nav_msgs::msg::OccupancyGrid msg;
+    msg.header.stamp = ctx_.clock->now();
+    msg.header.frame_id = ctx_.map_frame;
+    msg.info = action_grid_.getInfo();
+    msg.data = action_grid_.ToOccupancyData();
+    ctx_.action_map_pub->publish(msg);
+}
+
+void Actor::sendGoal(double x, double y) {
     const auto pose = getRobotPose();
     if (pose.has_value()) {
         const double dx = pose->first - x;
         const double dy = pose->second - y;
         const double dist = std::sqrt(dx * dx + dy * dy);
-        if (dist > 0.3) {
-            x += (dx / dist) * 0.3;
-            y += (dy / dist) * 0.3;
+        if (dist > 0.35) {
+            x += (dx / dist) * 0.35;
+            y += (dy / dist) * 0.35;
         }
     }
 
     nav2_msgs::action::NavigateToPose::Goal goal;
-    goal.pose.header.stamp = now();
-    goal.pose.header.frame_id = map_frame_;
+    goal.pose.header.stamp = ctx_.clock->now();
+    goal.pose.header.frame_id = ctx_.map_frame;
     goal.pose.pose.position.x = x;
     goal.pose.pose.position.y = y;
-    goal.pose.pose.position.z = 0.0;
     goal.pose.pose.orientation.w = 1.0;
-    goal.pose.pose.orientation.x = 0.0;
-    goal.pose.pose.orientation.y = 0.0;
-    goal.pose.pose.orientation.z = 0.0;
 
-    auto opts =
-        rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SendGoalOptions();
-    opts.goal_response_callback =
+    ctx_.nav_client->async_send_goal(goal, ctx_.send_goal_options);
+    ctx_.goal_active = true;
+    ctx_.goal_sent_time = std::chrono::steady_clock::now();
+
+    RCLCPP_INFO(ctx_.logger, "[Actor] Goal -> (%.2f,%.2f)", x, y);
+}
+
+std::optional<std::pair<double, double>> Actor::getRobotPose() const {
+    try {
+        const auto t = ctx_.tf_buffer->lookupTransform(
+            ctx_.map_frame, ctx_.robot_frame,
+            rclcpp::Time(0), rclcpp::Duration::from_seconds(0.1));
+        return std::make_pair(
+            t.transform.translation.x, t.transform.translation.y);
+    } catch (const tf2::TransformException &e) {
+        RCLCPP_WARN_THROTTLE(ctx_.logger, *ctx_.clock, 2000,
+                             "[Actor] TF: %s", e.what());
+        return std::nullopt;
+    }
+}
+
+DecisionNode::DecisionNode() : Node("decision_node") {
+    declare_parameter("map_frame", std::string("map"));
+    declare_parameter("robot_frame", std::string("base_footprint"));
+    declare_parameter("coverage_threshold", 0.95);
+    declare_parameter("sensor_coverage_radius", 0.3);
+    declare_parameter("goal_min_distance", 0.5);
+    declare_parameter("goal_timeout_seconds", 30.0);
+    declare_parameter("rescan_interval_seconds", 8.0);
+    declare_parameter("radius_initial", 1.5);
+    declare_parameter("radius_step", 0.5);
+    declare_parameter("radius_max", 8.0);
+    declare_parameter("samples_per_cycle", 40);
+    declare_parameter("corridor_bonus", 0.3);
+
+    declare_parameter("min_frontier_size", 3);
+    declare_parameter("action_zone_heat_threshold", 60.0);
+    declare_parameter("action_zone_cluster_radius", 1.5);
+    declare_parameter("action_zone_base_sigma", 0.4);
+    declare_parameter("action_delay_seconds", 1.0);
+    declare_parameter("control_rate", 1.0);
+
+    const std::string map_frame = get_parameter("map_frame").as_string();
+    const std::string robot_frame = get_parameter("robot_frame").as_string();
+    const double control_rate = get_parameter("control_rate").as_double();
+
+    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
+    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+    nav_client_ = rclcpp_action::create_client<
+        nav2_msgs::action::NavigateToPose>(this, "navigate_to_pose");
+
+    rclcpp::QoS latch(1);
+    latch.transient_local().reliable();
+
+    map_mutex_ = std::make_shared<std::mutex>();
+
+    ctx_.logger = get_logger();
+    ctx_.clock = get_clock();
+    ctx_.tf_buffer = tf_buffer_;
+    ctx_.nav_client = nav_client_;
+    ctx_.map_mutex = map_mutex_;
+    ctx_.map_frame = map_frame;
+    ctx_.robot_frame = robot_frame;
+    ctx_.action_map_pub =
+        create_publisher<nav_msgs::msg::OccupancyGrid>("/action_map", latch);
+    ctx_.goal_marker_pub =
+        create_publisher<visualization_msgs::msg::MarkerArray>(
+            "/thermocator/goal_markers",
+            rclcpp::QoS(1).transient_local().reliable());
+    ctx_.zone_marker_pub =
+        create_publisher<visualization_msgs::msg::MarkerArray>(
+            "/thermocator/action_zones",
+            rclcpp::QoS(1).transient_local().reliable());
+
+    ctx_.send_goal_options.goal_response_callback =
         std::bind(&DecisionNode::goalResponseCallback, this,
                   std::placeholders::_1);
-    opts.feedback_callback =
+    ctx_.send_goal_options.feedback_callback =
         std::bind(&DecisionNode::feedbackCallback, this,
                   std::placeholders::_1, std::placeholders::_2);
-    opts.result_callback =
+    ctx_.send_goal_options.result_callback =
         std::bind(&DecisionNode::resultCallback, this,
                   std::placeholders::_1);
 
-    nav_client_->async_send_goal(goal, opts);
-    goal_active_ = true;
+    thermal_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+        "/thermal_map", latch,
+        std::bind(&DecisionNode::thermalMapCallback, this,
+                  std::placeholders::_1));
+    spatial_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+        "/map", latch,
+        std::bind(&DecisionNode::spatialMapCallback, this,
+                  std::placeholders::_1));
+    costmap_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+        "/global_costmap/costmap", latch,
+        std::bind(&DecisionNode::costmapCallback, this,
+                  std::placeholders::_1));
 
-    publishGoalMarker(x, y);
-    RCLCPP_INFO(get_logger(), "Goal sent to (%.2f, %.2f)", x, y);
+    Explorer::Params ep;
+    ep.coverage_threshold = get_parameter("coverage_threshold").as_double();
+    ep.sensor_coverage_radius = get_parameter("sensor_coverage_radius").as_double();
+    ep.goal_min_distance = get_parameter("goal_min_distance").as_double();
+    ep.goal_timeout_seconds = get_parameter("goal_timeout_seconds").as_double();
+    ep.rescan_interval_seconds = get_parameter("rescan_interval_seconds").as_double();
+    ep.radius_initial = get_parameter("radius_initial").as_double();
+    ep.radius_step = get_parameter("radius_step").as_double();
+    ep.radius_max = get_parameter("radius_max").as_double();
+    ep.samples_per_cycle = get_parameter("samples_per_cycle").as_int();
+    ep.corridor_bonus = get_parameter("corridor_bonus").as_double();
+    explorer_ = std::make_unique<Explorer>(ctx_, ep);
+
+    Actor::Params ap;
+    ap.heat_threshold = get_parameter("action_zone_heat_threshold").as_double();
+    ap.cluster_radius = get_parameter("action_zone_cluster_radius").as_double();
+    ap.base_sigma = get_parameter("action_zone_base_sigma").as_double();
+    ap.action_delay = get_parameter("action_delay_seconds").as_double();
+    actor_ = std::make_unique<Actor>(ctx_, ap);
+
+    const auto period = std::chrono::duration<double>(1.0 / control_rate);
+    control_timer_ = create_wall_timer(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(period),
+        std::bind(&DecisionNode::controlLoop, this));
+
+    RCLCPP_INFO(get_logger(), "DecisionNode ready");
 }
 
-void DecisionNode::cancelGoal() {
-    if (current_goal_handle_) {
-        nav_client_->async_cancel_goal(current_goal_handle_);
-        current_goal_handle_.reset();
+void DecisionNode::thermalMapCallback(
+    const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
+    std::lock_guard<std::mutex> lk(*map_mutex_);
+    ctx_.thermal_map = msg;
+}
+
+void DecisionNode::spatialMapCallback(
+    const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
+    std::lock_guard<std::mutex> lk(*map_mutex_);
+    ctx_.spatial_map = msg;
+}
+
+void DecisionNode::costmapCallback(
+    const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
+    std::lock_guard<std::mutex> lk(*map_mutex_);
+    ctx_.costmap = msg;
+}
+
+void DecisionNode::controlLoop() {
+    if (phase_ == Phase::WAITING) {
+        bool ready;
+        {
+            std::lock_guard<std::mutex> lk(*map_mutex_);
+            ready = ctx_.thermal_map && ctx_.spatial_map && ctx_.costmap;
+        }
+        if (!ready) {
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
+                                 "Waiting for maps and costmap ...");
+            return;
+        }
+        if (!nav_client_->wait_for_action_server(
+                std::chrono::milliseconds(100))) {
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
+                                 "Waiting for Nav2 ...");
+            return;
+        }
+        RCLCPP_INFO(get_logger(), "Ready -- Phase 1");
+        phase_ = Phase::PHASE1;
     }
-    goal_active_ = false;
-}
 
-void DecisionNode::publishGoalMarker(double x, double y) {
-    visualization_msgs::msg::MarkerArray markers;
-    visualization_msgs::msg::Marker m;
-    m.header.stamp = now();
-    m.header.frame_id = map_frame_;
-    m.ns = "thermocator_goals";
-    m.id = marker_id_++;
-    m.type = visualization_msgs::msg::Marker::SPHERE;
-    m.action = visualization_msgs::msg::Marker::ADD;
-    m.pose.position.x = x;
-    m.pose.position.y = y;
-    m.pose.position.z = 0.1;
-    m.pose.orientation.w = 1.0;
-    m.scale.x = m.scale.y = m.scale.z = 0.2;
-    m.color.r = 1.0f;
-    m.color.g = 0.5f;
-    m.color.b = 0.0f;
-    m.color.a = 1.0f;
-    m.lifetime = rclcpp::Duration::from_seconds(0); // persist forever
-    markers.markers.push_back(m);
-    goal_marker_pub_->publish(markers);
-}
+    if (phase_ == Phase::PHASE1) {
+        if (explorer_->update()) {
+            RCLCPP_INFO(get_logger(), "Phase 1 done -- Phase 2");
+            phase_ = Phase::PHASE2;
+        }
+        return;
+    }
 
-// ----------------------------------------------------------------------------
-// Action client callbacks
-// ----------------------------------------------------------------------------
+    if (phase_ == Phase::PHASE2) {
+        if (actor_->update()) {
+            RCLCPP_INFO(get_logger(), "Phase 2 done -- mission complete");
+            phase_ = Phase::DONE;
+        }
+        return;
+    }
+
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 30000,
+                         "Mission complete");
+}
 
 void DecisionNode::goalResponseCallback(
     const rclcpp_action::ClientGoalHandle<
         nav2_msgs::action::NavigateToPose>::SharedPtr &handle) {
     if (!handle) {
-        RCLCPP_WARN(get_logger(), "Goal rejected by Nav2");
-        goal_active_ = false;
-        goal_failed_ = true;
+        ctx_.goal_active = false;
+        ctx_.goal_failed = true;
+        RCLCPP_WARN(get_logger(), "Goal rejected");
         return;
     }
     current_goal_handle_ = handle;
-    RCLCPP_INFO(get_logger(), "Goal accepted by Nav2");
 }
 
 void DecisionNode::feedbackCallback(
@@ -635,53 +780,19 @@ void DecisionNode::feedbackCallback(
         nav2_msgs::action::NavigateToPose>::SharedPtr,
     const std::shared_ptr<
         const nav2_msgs::action::NavigateToPose::Feedback>
-        feedback) {
+        fb) {
     RCLCPP_DEBUG(get_logger(),
-                 "Distance remaining: %.2fm", feedback->distance_remaining);
+                 "Remaining: %.2fm", fb->distance_remaining);
 }
 
 void DecisionNode::resultCallback(
     const rclcpp_action::ClientGoalHandle<
         nav2_msgs::action::NavigateToPose>::WrappedResult &result) {
-    goal_active_ = false;
-    switch (result.code) {
-    case rclcpp_action::ResultCode::SUCCEEDED:
-        RCLCPP_INFO(get_logger(), "Navigation succeeded");
-        goal_succeeded_ = true;
-        break;
-    case rclcpp_action::ResultCode::ABORTED:
-        RCLCPP_WARN(get_logger(), "Navigation aborted");
-        goal_failed_ = true;
-        break;
-    case rclcpp_action::ResultCode::CANCELED:
-        RCLCPP_INFO(get_logger(), "Navigation cancelled");
-        goal_failed_ = true;
-        break;
-    default:
-        RCLCPP_WARN(get_logger(), "Unknown navigation result");
-        goal_failed_ = true;
-        break;
-    }
-}
-
-// ----------------------------------------------------------------------------
-// TF
-// ----------------------------------------------------------------------------
-
-std::optional<std::pair<double, double>> DecisionNode::getRobotPose() const {
-    try {
-        const auto t = tf_buffer_->lookupTransform(
-            map_frame_, robot_frame_,
-            rclcpp::Time(0),
-            rclcpp::Duration::from_seconds(0.1));
-        return std::make_pair(
-            t.transform.translation.x,
-            t.transform.translation.y);
-    } catch (const tf2::TransformException &e) {
-        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-                             "TF lookup failed: %s", e.what());
-        return std::nullopt;
-    }
+    ctx_.goal_active = false;
+    if (result.code == rclcpp_action::ResultCode::SUCCEEDED)
+        ctx_.goal_succeeded = true;
+    else
+        ctx_.goal_failed = true;
 }
 
 } // namespace thermocator
