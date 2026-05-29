@@ -8,6 +8,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <sensor_msgs/msg/temperature.hpp>
+#include <std_msgs/msg/string.hpp>
 
 namespace thermocator {
 
@@ -22,6 +23,8 @@ class DtMediator : public rclcpp::Node {
         map_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>("/dt/map", latched_qos);
         thermal_map_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>("/dt/thermal_map", latched_qos);
         thermal_reading_pub_ = create_publisher<sensor_msgs::msg::Temperature>("/dt/thermal_reading", qos);
+        robot_status_pub_ = create_publisher<std_msgs::msg::String>("/dt/robot_status", qos);
+        environment_event_pub_ = create_publisher<std_msgs::msg::String>("/dt/environment_event", qos);
         cmd_vel_pub_ = create_publisher<geometry_msgs::msg::TwistStamped>("/cmd_vel", qos);
 
         odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
@@ -59,6 +62,20 @@ class DtMediator : public rclcpp::Node {
                 thermal_reading_pub_->publish(*msg);
             });
 
+        robot_status_sub_ = create_subscription<std_msgs::msg::String>(
+            "/robot/status", qos,
+            [this](std_msgs::msg::String::SharedPtr msg) {
+                logStream("/robot/status", "/dt/robot_status");
+                robot_status_pub_->publish(*msg);
+            });
+
+        environment_event_sub_ = create_subscription<std_msgs::msg::String>(
+            "/robot/environment_event", qos,
+            [this](std_msgs::msg::String::SharedPtr msg) {
+                logStream("/robot/environment_event", "/dt/environment_event");
+                environment_event_pub_->publish(*msg);
+            });
+
         dt_cmd_vel_sub_ = create_subscription<geometry_msgs::msg::Twist>(
             "/dt/cmd_vel", qos,
             [this](geometry_msgs::msg::Twist::SharedPtr msg) {
@@ -72,7 +89,7 @@ class DtMediator : public rclcpp::Node {
 
         RCLCPP_INFO(
             get_logger(),
-            "DT mediator ready: /odom,/scan,/map,/thermal_map,/thermal_reading -> /dt/* and /dt/cmd_vel -> /cmd_vel");
+            "DT mediator ready: robot streams -> /dt/* and /dt/cmd_vel -> /cmd_vel");
     }
 
   private:
@@ -87,6 +104,8 @@ class DtMediator : public rclcpp::Node {
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_pub_;
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr thermal_map_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Temperature>::SharedPtr thermal_reading_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr robot_status_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr environment_event_pub_;
     rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr cmd_vel_pub_;
 
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
@@ -94,6 +113,8 @@ class DtMediator : public rclcpp::Node {
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr thermal_map_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Temperature>::SharedPtr thermal_reading_sub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr robot_status_sub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr environment_event_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr dt_cmd_vel_sub_;
 };
 

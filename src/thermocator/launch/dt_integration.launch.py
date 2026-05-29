@@ -56,6 +56,14 @@ def generate_launch_description():
         ],
     )
 
+    status_monitor = Node(
+        package="thermocator",
+        executable="status_monitor",
+        name="status_monitor",
+        output="screen",
+        parameters=[{"use_sim_time": use_sim_time}],
+    )
+
     dt_mediator = Node(
         package="thermocator",
         executable="dt_mediator",
@@ -84,6 +92,7 @@ def generate_launch_description():
             thermal_broadcaster,
             thermocator,
             decision_node,
+            status_monitor,
             dt_mediator,
             sync_monitor,
         ]

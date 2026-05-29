@@ -35,6 +35,8 @@ ros2 topic echo /dt/odom --once
 ros2 topic echo /dt/scan --once
 ros2 topic echo /dt/thermal_reading --once
 ros2 topic echo /dt/thermal_map --once
+ros2 topic echo /dt/robot_status --once
+ros2 topic echo /dt/environment_event --once
 ```
 
 ## Terminal 6: send a test DT command
@@ -59,6 +61,8 @@ The `dt_integration.launch.py` terminal should print lines like:
 Sync ok [odom]
 Sync ok [scan]
 Sync ok [thermal_map]
+Sync ok [robot_status]
+Sync ok [environment_event]
 ```
 
 Warnings indicate the configured tolerance was exceeded.
@@ -71,6 +75,17 @@ ros2 topic echo /thermal_map --once
 ros2 topic hz /thermal_reading
 ros2 topic hz /thermal_map
 ```
+
+## Check state and environment mirroring
+
+```bash
+ros2 topic echo /robot/status --once
+ros2 topic echo /dt/robot_status --once
+ros2 topic echo /robot/environment_event --once
+ros2 topic echo /dt/environment_event --once
+```
+
+Expected result: `/dt/robot_status` mirrors the robot operating mode and sensor health, while `/dt/environment_event` mirrors whether the scan currently reports a nearby obstacle.
 
 ## Optional RViz safe launch
 
