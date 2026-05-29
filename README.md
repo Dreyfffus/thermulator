@@ -154,7 +154,7 @@ Two launch files are provided:
 | File | Purpose |
 |---|---|
 | `thermocator.launch.py` | Launches only the thermocator nodes (broadcaster, map builder, decision node). Requires Nav2 and Cartographer to already be running. |
-| `stack.launch.py` | Launches the entire simulation stack: Cartographer + Nav2 + lifecycle manager + thermocator nodes. Simulation only. |
+| `thermulator.launch.py` | Launches the entire simulation stack: Cartographer + Nav2 + lifecycle manager + thermocator nodes. Simulation only. |
 
 > [!IMPORTANT]
 > Both launch files expose `use_sim_time`. For the real TurtleBot3 on Linux this must be set to `false` — there is no simulation clock. For the Docker simulation setup it must be set to `true`.
@@ -196,10 +196,10 @@ ros2 launch thermocator thermocator.launch.py \
 > [!IMPORTANT]
 > If `params_file` points to a valid yaml file, it takes full control and individual arguments are ignored (except `use_sim_time` which is always applied). If the file is not found, individual arguments and their defaults are used.
 
-#### stack.launch.py (simulation only)
+#### thermulator.launch.py (simulation only)
 
 ```bash
-ros2 launch thermocator stack.launch.py
+ros2 launch thermocator thermulator.launch.py
 ```
 
 This launches in the following staggered order:
@@ -401,7 +401,7 @@ docker exec -it turtlebot3_container bash -c \
 >   "source /opt/ros/jazzy/setup.bash && \
 >    source /ws/install/setup.bash && \
 >    export TURTLEBOT3_MODEL=burger && \
->    ros2 launch thermocator stack.launch.py use_sim_time:=true"
+>    ros2 launch thermocator thermulator.launch.py use_sim_time:=true"
 > ```
 
 ---
