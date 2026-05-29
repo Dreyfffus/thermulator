@@ -6,6 +6,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
+#include <std_msgs/msg/string.hpp>
 
 namespace thermocator {
 
@@ -58,6 +59,28 @@ class SyncMonitor : public rclcpp::Node {
                 updateDt("thermal_map", msg->header.stamp);
             });
 
+        robot_status_sub_ = create_subscription<std_msgs::msg::String>(
+            "/robot/status", qos,
+            [this](std_msgs::msg::String::SharedPtr) {
+                updateOriginalArrivalOnly("robot_status");
+            });
+        dt_robot_status_sub_ = create_subscription<std_msgs::msg::String>(
+            "/dt/robot_status", qos,
+            [this](std_msgs::msg::String::SharedPtr) {
+                updateDtArrivalOnly("robot_status");
+            });
+
+        environment_event_sub_ = create_subscription<std_msgs::msg::String>(
+            "/robot/environment_event", qos,
+            [this](std_msgs::msg::String::SharedPtr) {
+                updateOriginalArrivalOnly("environment_event");
+            });
+        dt_environment_event_sub_ = create_subscription<std_msgs::msg::String>(
+            "/dt/environment_event", qos,
+            [this](std_msgs::msg::String::SharedPtr) {
+                updateDtArrivalOnly("environment_event");
+            });
+
         RCLCPP_INFO(
             get_logger(),
             "Sync monitor ready: tolerance %.3f seconds", tolerance_seconds_);
@@ -74,10 +97,27 @@ class SyncMonitor : public rclcpp::Node {
         report(name);
     }
 
+    void updateOriginalArrivalOnly(const std::string &name) {
+        updateArrivalOnly(samples_original_[name]);
+        report(name);
+    }
+
+    void updateDtArrivalOnly(const std::string &name) {
+        updateArrivalOnly(samples_dt_[name]);
+        report(name);
+    }
+
     void update(StreamSample &sample, const builtin_interfaces::msg::Time &stamp) {
         sample.arrival_stamp = now();
         sample.header_stamp = rclcpp::Time(stamp);
         sample.has_header_stamp = stamp.sec != 0 || stamp.nanosec != 0;
+        sample.received = true;
+    }
+
+    void updateArrivalOnly(StreamSample &sample) {
+        sample.arrival_stamp = now();
+        sample.header_stamp = rclcpp::Time(0, 0, RCL_ROS_TIME);
+        sample.has_header_stamp = false;
         sample.received = true;
     }
 
@@ -137,6 +177,10 @@ class SyncMonitor : public rclcpp::Node {
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr dt_scan_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr thermal_map_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr dt_thermal_map_sub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr robot_status_sub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr dt_robot_status_sub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr environment_event_sub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr dt_environment_event_sub_;
 };
 
 } // namespace thermocator

@@ -44,7 +44,7 @@
 
 - Objective: verify command flow from DT interface to robot/simulation command topic.
 - Command: `ros2 topic pub --once /dt/cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.05}, angular: {z: 0.0}}"`
-- Expected topics/nodes: `dt_mediator`, `/dt/cmd_vel`, `/cmd_vel`.
+- Expected topics/nodes: `dt_mediator`, `dt_safety_controller`, `/dt/cmd_vel`, `/cmd_vel`, `/dt/control_status`.
 - Pass condition: `/cmd_vel` receives the forwarded `geometry_msgs/msg/TwistStamped` command and the robot moves if the simulator accepts `/cmd_vel`.
 - Current status: implemented, untested.
 
@@ -52,16 +52,16 @@
 
 - Objective: measure delay between original and `/dt/*` streams.
 - Command: `ros2 launch thermocator dt_integration.launch.py sync_tolerance_seconds:=0.5`
-- Expected topics/nodes: `sync_monitor`.
-- Pass condition: sync monitor prints `Sync ok` for active mirrored stream pairs, or warns when delay exceeds tolerance.
+- Expected topics/nodes: `sync_monitor`, `/robot/status`, `/dt/robot_status`, `/robot/environment_event`, `/dt/environment_event`.
+- Pass condition: sync monitor prints `Sync ok` for active mirrored stream pairs, including robot status and environment event streams, or warns when delay exceeds tolerance.
 - Current status: implemented, untested.
 
 ## 8. Obstacle detection and avoidance
 
 - Objective: verify Nav2 uses `/scan` and avoids Gazebo obstacles.
 - Command: `ros2 launch turtlebot3_navigation2 navigation2.launch.py use_sim_time:=true params_file:=/ws/src/thermocator/config/nav2_thermal_params.yaml`
-- Expected topics/nodes: Nav2 lifecycle nodes, costmaps, `/scan`.
-- Pass condition: robot plans around obstacles in the custom world.
+- Expected topics/nodes: Nav2 lifecycle nodes, costmaps, `/scan`, `/robot/environment_event`, `/dt/environment_event`, `/dt/control_status`, `/dt/cmd_vel`, `/cmd_vel`.
+- Pass condition: robot plans around obstacles in the custom world, obstacle state is mirrored from `/robot/environment_event` to `/dt/environment_event`, and the DT safety controller publishes a stop command when the mirrored event reports a nearby obstacle.
 - Current status: partially implemented, untested.
 
 ## 9. Object interaction / simplified equivalent

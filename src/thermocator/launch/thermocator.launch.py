@@ -182,7 +182,15 @@ def generate_launch_description():
             ],
         )
 
-        return [thermal_broadcaster, thermal_map_builder, decision_node]
+        status_monitor = Node(
+            package="thermocator",
+            executable="status_monitor",
+            name="status_monitor",
+            output="screen",
+            parameters=[{"use_sim_time": use_sim_time}],
+        )
+
+        return [thermal_broadcaster, thermal_map_builder, decision_node, status_monitor]
 
     return LaunchDescription(
         [

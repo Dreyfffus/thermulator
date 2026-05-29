@@ -149,15 +149,16 @@ dock <start | attach | remote> [service] [package]
 
 ### Launch Files
 
-Two launch files are provided:
+Three launch files are provided:
 
 | File | Purpose |
 |---|---|
-| `thermocator.launch.py` | Launches only the thermocator nodes (broadcaster, map builder, decision node). Requires Nav2 and Cartographer to already be running. |
-| `stack.launch.py` | Launches the entire simulation stack: Cartographer + Nav2 + lifecycle manager + thermocator nodes. Simulation only. |
+| `thermocator.launch.py` | Launches only the thermocator nodes (broadcaster, map builder, decision node, status monitor). Requires Nav2 and Cartographer to already be running. |
+| `dt_integration.launch.py` | Launches the thermocator pipeline, DT mediator, sync monitor, status mirror, and DT safety controller. Requires robot/simulation and map sources to already be running. |
+| `thermulator.launch.py` | Launches the entire simulation stack: Cartographer + Nav2 + lifecycle manager + thermocator nodes. Simulation only. |
 
 > [!IMPORTANT]
-> Both launch files expose `use_sim_time`. For the real TurtleBot3 on Linux this must be set to `false` — there is no simulation clock. For the Docker simulation setup it must be set to `true`.
+> These launch files expose `use_sim_time`. For the real TurtleBot3 on Linux this must be set to `false` — there is no simulation clock. For the Docker simulation setup it must be set to `true`.
 
 #### thermocator.launch.py
 
@@ -196,10 +197,10 @@ ros2 launch thermocator thermocator.launch.py \
 > [!IMPORTANT]
 > If `params_file` points to a valid yaml file, it takes full control and individual arguments are ignored (except `use_sim_time` which is always applied). If the file is not found, individual arguments and their defaults are used.
 
-#### stack.launch.py (simulation only)
+#### thermulator.launch.py (simulation only)
 
 ```bash
-ros2 launch thermocator stack.launch.py
+ros2 launch thermocator thermulator.launch.py
 ```
 
 This launches in the following staggered order:
@@ -401,7 +402,7 @@ docker exec -it turtlebot3_container bash -c \
 >   "source /opt/ros/jazzy/setup.bash && \
 >    source /ws/install/setup.bash && \
 >    export TURTLEBOT3_MODEL=burger && \
->    ros2 launch thermocator stack.launch.py use_sim_time:=true"
+>    ros2 launch thermocator thermulator.launch.py use_sim_time:=true"
 > ```
 
 ---
@@ -436,6 +437,33 @@ Autonomous thermal exploration brain. Operates in two phases:
 **Subscribes:** `/map`, `/thermal_map`
 **Publishes:** `/thermocator/goal_markers` (`visualization_msgs/msg/MarkerArray`)
 **Action client:** `navigate_to_pose` (Nav2)
+
+---
+
+### `status_monitor`
+
+Publishes internal robot status for DT state synchronization and environment events for mirrored obstacle response. It derives operating mode, sensor health, battery level, speed, thermal sensor health, and nearby-obstacle state from `/scan`, `/odom`, and `/thermal_reading`.
+
+**Subscribes:** `/scan`, `/odom`, `/thermal_reading`
+**Publishes:** `/robot/status`, `/robot/environment_event`
+
+---
+
+### `dt_mediator`
+
+Mirrors robot-side streams into `/dt/*` topics and forwards DT-side velocity commands back to the robot/simulation.
+
+**Subscribes:** `/odom`, `/scan`, `/map`, `/thermal_map`, `/thermal_reading`, `/robot/status`, `/robot/environment_event`, `/dt/cmd_vel`
+**Publishes:** `/dt/odom`, `/dt/scan`, `/dt/map`, `/dt/thermal_map`, `/dt/thermal_reading`, `/dt/robot_status`, `/dt/environment_event`, `/cmd_vel`
+
+---
+
+### `dt_safety_controller`
+
+Subscribes to mirrored DT environment events and publishes a zero-velocity command to `/dt/cmd_vel` when the digital twin observes an `OBSTACLE_NEARBY` event. This closes the feedback loop from environment sensing to DT-side response and back to robot behavior.
+
+**Subscribes:** `/dt/environment_event`
+**Publishes:** `/dt/cmd_vel`, `/dt/control_status`
 
 ---
 
