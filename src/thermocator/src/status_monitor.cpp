@@ -17,9 +17,15 @@ class StatusMonitor : public rclcpp::Node {
     StatusMonitor() : Node("status_monitor") {
         declare_parameter("obstacle_warning_distance", 0.45);
         declare_parameter("publish_rate", 2.0);
+        declare_parameter("initial_battery_level", 100.0);
+        declare_parameter("battery_drain_per_second", 0.02);
 
         obstacle_warning_distance_ =
             get_parameter("obstacle_warning_distance").as_double();
+        battery_level_ = get_parameter("initial_battery_level").as_double();
+        battery_drain_per_second_ =
+            get_parameter("battery_drain_per_second").as_double();
+        last_battery_update_ = now();
 
         scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
             "/scan", rclcpp::QoS(10),
@@ -102,6 +108,8 @@ class StatusMonitor : public rclcpp::Node {
     }
 
     void publishStatus() {
+        updateBattery();
+
         const bool scan_ok = scan_received_ && fresh(last_scan_time_, 2.0);
         const bool odom_ok = odom_received_ && fresh(last_odom_time_, 2.0);
         const bool thermal_ok = thermal_received_ && fresh(last_thermal_time_, 3.0);
@@ -110,6 +118,8 @@ class StatusMonitor : public rclcpp::Node {
         std_msgs::msg::String status_msg;
         std::ostringstream status;
         status << "mode=" << mode()
+               << "; battery_level=" << battery_level_
+               << "; battery_ok=" << (battery_level_ > 20.0 ? "true" : "false")
                << "; scan_ok=" << (scan_ok ? "true" : "false")
                << "; odom_ok=" << (odom_ok ? "true" : "false")
                << "; thermal_ok=" << (thermal_ok ? "true" : "false")
@@ -145,16 +155,35 @@ class StatusMonitor : public rclcpp::Node {
         environment_pub_->publish(environment_msg);
     }
 
+    void updateBattery() {
+        const auto current_time = now();
+        if (last_battery_update_.nanoseconds() == 0) {
+            last_battery_update_ = current_time;
+            return;
+        }
+
+        const double elapsed = (current_time - last_battery_update_).seconds();
+        if (elapsed <= 0.0) {
+            return;
+        }
+
+        battery_level_ = std::max(0.0, battery_level_ - elapsed * battery_drain_per_second_);
+        last_battery_update_ = current_time;
+    }
+
     double obstacle_warning_distance_{0.45};
     double nearest_obstacle_m_{std::numeric_limits<double>::infinity()};
     double speed_mps_{0.0};
     double last_thermal_value_{0.0};
+    double battery_level_{100.0};
+    double battery_drain_per_second_{0.02};
     bool scan_received_{false};
     bool odom_received_{false};
     bool thermal_received_{false};
     rclcpp::Time last_scan_time_{0, 0, RCL_ROS_TIME};
     rclcpp::Time last_odom_time_{0, 0, RCL_ROS_TIME};
     rclcpp::Time last_thermal_time_{0, 0, RCL_ROS_TIME};
+    rclcpp::Time last_battery_update_{0, 0, RCL_ROS_TIME};
 
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;

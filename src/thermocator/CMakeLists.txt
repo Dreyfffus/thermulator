@@ -93,6 +93,12 @@ add_executable(status_monitor
 ament_target_dependencies(status_monitor ${THERMOCATOR_DEPS})
 target_compile_features(status_monitor PUBLIC cxx_std_17)
 
+add_executable(dt_safety_controller
+    src/dt_safety_controller.cpp
+)
+ament_target_dependencies(dt_safety_controller ${THERMOCATOR_DEPS})
+target_compile_features(dt_safety_controller PUBLIC cxx_std_17)
+
 add_library(thermocator_display SHARED
   src/thermal_display.cpp
   include/thermocator/thermal_display.hpp
@@ -131,6 +137,7 @@ install(TARGETS
   dt_mediator
   sync_monitor
   status_monitor
+  dt_safety_controller
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}

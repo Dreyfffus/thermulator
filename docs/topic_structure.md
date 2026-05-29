@@ -23,6 +23,7 @@
 - `/dt/thermal_reading`: mirror of `/thermal_reading`.
 - `/dt/robot_status`: mirror of `/robot/status`, including operating mode, sensor health, speed, thermal sensor health, and obstacle state.
 - `/dt/environment_event`: mirror of `/robot/environment_event`, including whether the robot currently sees a nearby obstacle.
+- `/dt/control_status`: status published by the DT safety controller when it is monitoring or issuing a safety stop.
 - `/dt/cmd_vel`: digital-twin command input forwarded to `/cmd_vel`.
 
 ## Command flow
@@ -30,6 +31,14 @@
 1. A test operator, demo script, or future DT controller publishes `geometry_msgs/msg/Twist` to `/dt/cmd_vel`.
 2. `dt_mediator` wraps the command in `geometry_msgs/msg/TwistStamped` and republishes it to `/cmd_vel`.
 3. The robot or Gazebo simulation consumes `/cmd_vel`.
+
+## DT safety feedback flow
+
+1. `status_monitor` detects nearby obstacles from `/scan` and publishes `/robot/environment_event`.
+2. `dt_mediator` mirrors this to `/dt/environment_event`.
+3. `dt_safety_controller` subscribes to `/dt/environment_event`.
+4. When the mirrored event reports `OBSTACLE_NEARBY`, the DT safety controller publishes a zero-velocity command to `/dt/cmd_vel`.
+5. `dt_mediator` forwards the safety command to `/cmd_vel`, so the mirrored environment event can affect robot behavior.
 
 ## Sensor flow
 

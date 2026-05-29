@@ -37,6 +37,7 @@ ros2 topic echo /dt/thermal_reading --once
 ros2 topic echo /dt/thermal_map --once
 ros2 topic echo /dt/robot_status --once
 ros2 topic echo /dt/environment_event --once
+ros2 topic echo /dt/control_status --once
 ```
 
 ## Terminal 6: send a test DT command
@@ -83,9 +84,12 @@ ros2 topic echo /robot/status --once
 ros2 topic echo /dt/robot_status --once
 ros2 topic echo /robot/environment_event --once
 ros2 topic echo /dt/environment_event --once
+ros2 topic echo /dt/control_status --once
 ```
 
 Expected result: `/dt/robot_status` mirrors the robot operating mode and sensor health, while `/dt/environment_event` mirrors whether the scan currently reports a nearby obstacle.
+
+When `/dt/environment_event` reports `OBSTACLE_NEARBY`, `/dt/control_status` should report `SAFETY_STOP`, and `/cmd_vel` should receive a forwarded zero-velocity command from the DT safety controller.
 
 ## Optional RViz safe launch
 

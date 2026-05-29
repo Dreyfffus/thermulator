@@ -72,6 +72,14 @@ def generate_launch_description():
         parameters=[{"use_sim_time": use_sim_time}],
     )
 
+    dt_safety_controller = Node(
+        package="thermocator",
+        executable="dt_safety_controller",
+        name="dt_safety_controller",
+        output="screen",
+        parameters=[{"use_sim_time": use_sim_time}],
+    )
+
     sync_monitor = Node(
         package="thermocator",
         executable="sync_monitor",
@@ -94,6 +102,7 @@ def generate_launch_description():
             decision_node,
             status_monitor,
             dt_mediator,
+            dt_safety_controller,
             sync_monitor,
         ]
     )
