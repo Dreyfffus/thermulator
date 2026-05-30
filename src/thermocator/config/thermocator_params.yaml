@@ -48,3 +48,4 @@ decision_node:
     action_zone_cluster_radius: 1.5
     action_zone_base_sigma: 0.4
     action_delay_seconds: 1.0
+    max_search_cells: 250

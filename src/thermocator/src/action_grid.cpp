@@ -57,8 +57,6 @@ void ActionGrid::WriteZone(
             const size_t idx =
                 static_cast<size_t>(row) * _width + col;
 
-            // Take the max of existing and new contribution
-            // so overlapping zones don't cancel each other out
             _values[idx] = std::max(_values[idx], gaussian);
         }
     }

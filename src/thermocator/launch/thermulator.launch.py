@@ -32,9 +32,6 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     use_rviz = LaunchConfiguration("use_rviz")
 
-    # -------------------------------------------------------------------------
-    # Cartographer -- launched first, owns /map and map->odom TF
-    # -------------------------------------------------------------------------
     cartographer = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_cartographer, "launch", "cartographer.launch.py")
@@ -44,9 +41,6 @@ def generate_launch_description():
         }.items(),
     )
 
-    # -------------------------------------------------------------------------
-    # Nav2 -- delayed 5s, autostart disabled so our lifecycle manager controls it
-    # -------------------------------------------------------------------------
     nav2 = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_nav2_bringup, "launch", "navigation_launch.py")
@@ -83,14 +77,6 @@ def generate_launch_description():
 
     nav2_delayed = TimerAction(period=5.0, actions=[nav2, lifecycle_manager])
 
-    # -------------------------------------------------------------------------
-    # Thermocator stack -- delayed 10s
-    #   0s  -> cartographer
-    #   5s  -> nav2 + lifecycle manager
-    #  10s  -> thermal_broadcaster        (thermocator.launch.py t=0)
-    #  13s  -> thermal_map_builder        (thermocator.launch.py t=3)
-    #  18s  -> decision_node              (thermocator.launch.py t=8)
-    # -------------------------------------------------------------------------
     thermocator = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(thermocator_launch_file),
         launch_arguments={
@@ -100,11 +86,6 @@ def generate_launch_description():
 
     thermocator_delayed = TimerAction(period=10.0, actions=[thermocator])
 
-    # -------------------------------------------------------------------------
-    # RViz2 -- pre-loaded with thermocator.rviz if it exists
-    # Falls back to blank RViz2 if the config has not been saved yet
-    # Disable with use_rviz:=false
-    # -------------------------------------------------------------------------
     rviz_args = ["-d", rviz_config_file] if os.path.isfile(rviz_config_file) else []
 
     rviz = Node(

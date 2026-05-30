@@ -16,13 +16,8 @@
 
 namespace thermocator {
 
-// ----------------------------------------------------------------------------
-// Constructor
-// ----------------------------------------------------------------------------
-
 OccupancyGridOverlay::OccupancyGridOverlay(std::string default_topic, RgbaDefault cold, RgbaDefault hot)
     : _default_topic(std::move(default_topic)), _default_cold(cold), _default_hot(hot) {
-    // Cold endpoint group
     _cold_color_property = new rviz_common::properties::ColorProperty(
         "Cold Color", _default_cold.color,
         "Color at occupancy value 0",
@@ -49,10 +44,6 @@ OccupancyGridOverlay::OccupancyGridOverlay(std::string default_topic, RgbaDefaul
     _hot_alpha_property->setMax(1.0f);
 }
 
-// ----------------------------------------------------------------------------
-// Destructor
-// ----------------------------------------------------------------------------
-
 OccupancyGridOverlay::~OccupancyGridOverlay() {
     if (initialized()) {
         scene_manager_->destroyManualObject(_manual_object);
@@ -67,10 +58,6 @@ OccupancyGridOverlay::~OccupancyGridOverlay() {
             _resource_group_name);
     }
 }
-
-// ----------------------------------------------------------------------------
-// Lifecycle
-// ----------------------------------------------------------------------------
 
 void OccupancyGridOverlay::onInitialize() {
     MessageFilterDisplay::onInitialize();
@@ -178,13 +165,11 @@ void OccupancyGridOverlay::updateTexture(
         _material->getTechnique(0)->getPass(0)->getTextureUnitState(0)->setTextureName(_texture->getName());
     }
 
-    // Read current property values -- all four endpoints
     const QColor cold_color = _cold_color_property->getColor();
     const QColor hot_color = _hot_color_property->getColor();
     const float cold_alpha = _cold_alpha_property->getFloat();
     const float hot_alpha = _hot_alpha_property->getFloat();
 
-    // Pre-compute float endpoints for interpolation
     const float cr = static_cast<float>(cold_color.red());
     const float cg = static_cast<float>(cold_color.green());
     const float cb = static_cast<float>(cold_color.blue());
@@ -213,13 +198,11 @@ void OccupancyGridOverlay::updateTexture(
             const int8_t val = grid.data[idx];
 
             if (val == -1) {
-                // Unknown -- always fully transparent
                 data[pix + 0] = 0;
                 data[pix + 1] = 0;
                 data[pix + 2] = 0;
                 data[pix + 3] = 0;
             } else {
-                // Interpolate all four channels
                 const float t = static_cast<float>(val) / 100.0f;
                 data[pix + 0] = static_cast<uint8_t>(cr + t * dr);
                 data[pix + 1] = static_cast<uint8_t>(cg + t * dg);

@@ -1,13 +1,10 @@
 #pragma once
 
-#include <atomic>
 #include <chrono>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <queue>
 #include <random>
-#include <string>
 #include <vector>
 
 #include <nav2_msgs/action/navigate_to_pose.hpp>
@@ -33,6 +30,12 @@ struct Frontier {
     double distance = 0.0;
 };
 
+struct ActionZone {
+    double world_x = 0.0;
+    double world_y = 0.0;
+    double strength = 0.0;
+};
+
 class Explorer {
   public:
     struct Params {
@@ -54,8 +57,10 @@ class Explorer {
     bool isComplete() const { return complete_; }
 
   private:
-    enum class State { SCANNING,
-                       NAVIGATING };
+    enum class State {
+        SCANNING,
+        NAVIGATING
+    };
 
     void handleScanning();
     void handleNavigating();
@@ -104,6 +109,7 @@ class Actor {
         double cluster_radius = 1.5;
         double base_sigma = 0.4;
         double action_delay = 1.0;
+        int max_search_cells = 200;
     };
 
     explicit Actor(NodeContext &ctx, const Params &p);
@@ -111,14 +117,10 @@ class Actor {
     bool isComplete() const { return complete_; }
 
   private:
-    enum class State { PLANNING,
-                       NAVIGATING,
-                       ACTIONING };
-
-    struct ActionZone {
-        double world_x = 0.0;
-        double world_y = 0.0;
-        double strength = 0.0;
+    enum class State {
+        PLANNING,
+        NAVIGATING,
+        ACTIONING
     };
 
     void handlePlanning();
@@ -126,11 +128,16 @@ class Actor {
     void handleActioning();
 
     std::vector<ActionZone> clusterHotSpots(
+        const nav_msgs::msg::OccupancyGrid &costmap,
         const nav_msgs::msg::OccupancyGrid &thermal) const;
 
     std::vector<size_t> planRoute(
         const std::vector<ActionZone> &zones,
         double rx, double ry) const;
+
+    std::pair<double, double> nudgeToFreeCell(
+        double wx, double wy,
+        const nav_msgs::msg::OccupancyGrid &costmap) const;
 
     void publishZoneMarker(const ActionZone &zone, int id);
     void publishActionMap(const ActionZone &zone);
@@ -194,10 +201,13 @@ class DecisionNode : public rclcpp::Node {
     std::unique_ptr<Explorer> explorer_;
     std::unique_ptr<Actor> actor_;
 
-    enum class Phase { WAITING,
-                       PHASE1,
-                       PHASE2,
-                       DONE };
+    enum class Phase {
+        WAITING,
+        PHASE1,
+        PHASE2,
+        DONE
+    };
+
     Phase phase_ = Phase::WAITING;
 };
 

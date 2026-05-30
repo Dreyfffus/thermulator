@@ -1,11 +1,12 @@
 #include "thermocator/decision_node.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <limits>
-#include <queue>
 #include <rclcpp/logging.hpp>
+#include <string>
 
 namespace thermocator {
 
@@ -361,14 +362,16 @@ bool Actor::update() {
 
 void Actor::handlePlanning() {
     nav_msgs::msg::OccupancyGrid::SharedPtr thermal_copy;
+    nav_msgs::msg::OccupancyGrid::SharedPtr costmap_copy;
     {
         std::lock_guard<std::mutex> lk(*ctx_.map_mutex);
         thermal_copy = ctx_.thermal_map;
+        costmap_copy = ctx_.costmap;
     }
-    if (!thermal_copy)
+    if (!thermal_copy || !costmap_copy)
         return;
 
-    zones_ = clusterHotSpots(*thermal_copy);
+    zones_ = clusterHotSpots(*costmap_copy, *thermal_copy);
     if (zones_.empty()) {
         RCLCPP_WARN(ctx_.logger, "[Actor] No hot spots -- done");
         complete_ = true;
@@ -438,7 +441,8 @@ void Actor::handleActioning() {
     state_ = State::NAVIGATING;
 }
 
-std::vector<Actor::ActionZone> Actor::clusterHotSpots(
+std::vector<ActionZone> Actor::clusterHotSpots(
+    const nav_msgs::msg::OccupancyGrid &costmap,
     const nav_msgs::msg::OccupancyGrid &thermal) const {
     const auto &ti = thermal.info;
     const auto thresh = static_cast<int8_t>(params_.heat_threshold);
@@ -490,9 +494,81 @@ std::vector<Actor::ActionZone> Actor::clusterHotSpots(
             sh += hot[j].value;
             ++cnt;
         }
-        zones.push_back({sx / cnt, sy / cnt, sh / cnt});
+
+        const double raw_x = sx / cnt;
+        const double raw_y = sy / cnt;
+
+        const auto [nav_x, nav_y] = nudgeToFreeCell(raw_x, raw_y, costmap);
+
+        zones.push_back({nav_x, nav_y, sh / cnt});
     }
+
     return zones;
+}
+
+std::pair<double, double> Actor::nudgeToFreeCell(
+    double wx, double wy,
+    const nav_msgs::msg::OccupancyGrid &costmap) const {
+    const auto &ci = costmap.info;
+
+    const int col0 = static_cast<int>((wx - ci.origin.position.x) / ci.resolution);
+    const int row0 = static_cast<int>((wy - ci.origin.position.y) / ci.resolution);
+
+    if (col0 >= 0 && col0 < (int)ci.width &&
+        row0 >= 0 && row0 < (int)ci.height) {
+        const auto cv = costmap.data[static_cast<size_t>(row0) * ci.width + col0];
+        if (cv >= 0 && cv < 99)
+            return {wx, wy};
+    }
+
+    const int start_col = std::clamp(col0, 0, (int)ci.width - 1);
+    const int start_row = std::clamp(row0, 0, (int)ci.height - 1);
+
+    const size_t map_sz = static_cast<size_t>(ci.width) * ci.height;
+    std::vector<bool> visited(map_sz, false);
+    std::queue<std::pair<int, int>> q;
+
+    const size_t start_idx = static_cast<size_t>(start_row) * ci.width + start_col;
+    visited[start_idx] = true;
+    q.push({start_row, start_col});
+
+    const int nb8[8][2] = {
+        {-1, -1}, {-1, 0}, {-1, 1}, {0, -1}, {0, 1}, {1, -1}, {1, 0}, {1, 1}};
+
+    const int max_search_cells = params_.max_search_cells;
+    int searched = 0;
+
+    while (!q.empty() && searched < max_search_cells) {
+        const auto [r, c] = q.front();
+        q.pop();
+        ++searched;
+
+        const auto cv = costmap.data[static_cast<size_t>(r) * ci.width + c];
+
+        if (cv >= 0 && cv < 99) {
+            return {
+                ci.origin.position.x + (c + 0.5) * ci.resolution,
+                ci.origin.position.y + (r + 0.5) * ci.resolution};
+        }
+
+        for (const auto &n : nb8) {
+            const int nr = r + n[0], nc = c + n[1];
+            if (nr < 0 || nr >= (int)ci.height ||
+                nc < 0 || nc >= (int)ci.width)
+                continue;
+            const size_t nidx = static_cast<size_t>(nr) * ci.width + nc;
+            if (!visited[nidx]) {
+                visited[nidx] = true;
+                q.push({nr, nc});
+            }
+        }
+    }
+
+    RCLCPP_WARN_THROTTLE(ctx_.logger, *ctx_.clock, 3000,
+                         "[Actor] no free cell near (%.2f, %.2f) within %d steps -- using original",
+                         wx, wy, max_search_cells);
+
+    return {wx, wy};
 }
 
 std::vector<size_t> Actor::planRoute(
@@ -619,6 +695,7 @@ DecisionNode::DecisionNode() : Node("decision_node") {
     declare_parameter("action_zone_base_sigma", 0.4);
     declare_parameter("action_delay_seconds", 1.0);
     declare_parameter("control_rate", 1.0);
+    declare_parameter("max_search_cells", 200);
 
     const std::string map_frame = get_parameter("map_frame").as_string();
     const std::string robot_frame = get_parameter("robot_frame").as_string();
@@ -693,6 +770,7 @@ DecisionNode::DecisionNode() : Node("decision_node") {
     ap.cluster_radius = get_parameter("action_zone_cluster_radius").as_double();
     ap.base_sigma = get_parameter("action_zone_base_sigma").as_double();
     ap.action_delay = get_parameter("action_delay_seconds").as_double();
+    ap.max_search_cells = get_parameter("max_search_cells").as_int();
     actor_ = std::make_unique<Actor>(ctx_, ap);
 
     const auto period = std::chrono::duration<double>(1.0 / control_rate);

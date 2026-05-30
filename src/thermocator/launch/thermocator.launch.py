@@ -85,6 +85,9 @@ def generate_launch_description():
     action_delay_seconds_arg = DeclareLaunchArgument(
         "action_delay_seconds", default_value="1.0"
     )
+    max_search_cells_arg = DeclareLaunchArgument(
+        "max_search_cells", default_value="200"
+    )
     control_rate_arg = DeclareLaunchArgument("control_rate", default_value="1.0")
 
     def launch_nodes(context):
@@ -171,6 +174,7 @@ def generate_launch_description():
                     "action_zone_cluster_radius": f("action_zone_cluster_radius"),
                     "action_zone_base_sigma": f("action_zone_base_sigma"),
                     "action_delay_seconds": f("action_delay_seconds"),
+                    "max_search_cells": i("max_search_cells"),
                     "control_rate": f("control_rate"),
                 }
             ]
@@ -241,6 +245,7 @@ def generate_launch_description():
             action_zone_cluster_radius_arg,
             action_zone_base_sigma_arg,
             action_delay_seconds_arg,
+            max_search_cells_arg,
             control_rate_arg,
             OpaqueFunction(function=launch_nodes),
         ]

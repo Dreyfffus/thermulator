@@ -16,13 +16,6 @@
 
 namespace thermocator {
 
-// ----------------------------------------------------------------------------
-// NodeContext
-//
-// Shared resources owned by DecisionNode and passed to both phases.
-// Phases never own these — they only hold a reference to this struct.
-// ----------------------------------------------------------------------------
-
 struct NodeContext {
     rclcpp::Logger logger = rclcpp::get_logger("NodeContext");
     rclcpp::Clock::SharedPtr clock;
@@ -51,10 +44,6 @@ struct NodeContext {
     std::string robot_frame;
     int marker_id{0};
 };
-
-// ============================================================================
-// CoverageBox -- one rectangular region to sweep with boustrophedon path
-// ============================================================================
 
 struct CoverageBox {
     double x_min = 0.0;

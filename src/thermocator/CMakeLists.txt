@@ -5,6 +5,16 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+# =============================================================================
+# Option: build digital twin nodes (requires ros_gz_interfaces + Gazebo)
+# Off by default so the physical robot build has no Gazebo dependency.
+# Usage: colcon build --cmake-args -DBUILD_DT=ON
+# =============================================================================
+option(BUILD_DT "Build digital twin nodes (requires ros_gz_interfaces)" OFF)
+
+# =============================================================================
+# Core dependencies (always required)
+# =============================================================================
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(tf2 REQUIRED)
@@ -25,6 +35,11 @@ find_package(rclcpp_action REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 
+# Digital twin dependency — only resolved when BUILD_DT=ON
+if(BUILD_DT)
+  find_package(ros_gz_interfaces REQUIRED)
+endif()
+
 set(THERMOCATOR_DEPS
   rclcpp
   rclcpp_action
@@ -42,7 +57,6 @@ set(THERMOCATOR_DEPS
 
 # =============================================================================
 # decision_node
-# Phase1Explorer, Phase2Actor, ActionGrid all compiled into the same executable
 # =============================================================================
 add_executable(decision_node
   src/decision_node.cpp
@@ -84,29 +98,7 @@ target_include_directories(thermal_broadcaster PUBLIC
 target_compile_features(thermal_broadcaster PUBLIC cxx_std_17)
 
 # =============================================================================
-# dt_mediator
-# =============================================================================
-add_executable(dt_mediator
-  src/dt_mediator.cpp
-)
-ament_target_dependencies(dt_mediator ${THERMOCATOR_DEPS})
-target_compile_features(dt_mediator PUBLIC cxx_std_17)
-
-# =============================================================================
-# sync_monitor
-# =============================================================================
-add_executable(sync_monitor
-  src/sync_monitor.cpp
-)
-ament_target_dependencies(sync_monitor ${THERMOCATOR_DEPS})
-target_compile_features(sync_monitor PUBLIC cxx_std_17)
-
-# =============================================================================
 # thermocator_display -- RViz2 plugin shared library
-#
-# Replaces thermal_display.cpp with occupancy_grid_overlay.cpp.
-# Registers two plugin variants: ThermalOverlay and ActionOverlay.
-# Both live in the same shared library, selected by plugin_description.xml.
 # =============================================================================
 add_library(thermocator_display SHARED
   src/occupancy_grid_overlay.cpp
@@ -129,29 +121,64 @@ target_link_libraries(thermocator_display
   Qt5::Core
   Qt5::Widgets
 )
-
 target_compile_options(thermocator_display PRIVATE
   -Wno-unused-parameter
   -Wno-pedantic
   -Wno-extra
 )
-
-# Required for Qt MOC -- RViz2 plugins use Qt signals/slots
 set_property(TARGET thermocator_display PROPERTY AUTOMOC ON)
-
-# Register both plugin variants with pluginlib
 pluginlib_export_plugin_description_file(rviz_common plugin_description.xml)
+
+# =============================================================================
+# Digital twin nodes — only built when BUILD_DT=ON
+# =============================================================================
+if(BUILD_DT)
+  set(DT_DEPS
+    ${THERMOCATOR_DEPS}
+    ros_gz_interfaces
+  )
+
+  # pose_sync_node — teleports Gazebo sim robot to real robot's pose
+  add_executable(pose_sync_node
+    src/pose_sync_node.cpp
+  )
+  ament_target_dependencies(pose_sync_node ${DT_DEPS})
+  target_include_directories(pose_sync_node PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
+  )
+  target_compile_features(pose_sync_node PUBLIC cxx_std_17)
+
+  # advisory_node — runs detection in Domain 1 and publishes /advisory/goal
+  add_executable(advisory_node
+    src/advisory_node.cpp
+  )
+  ament_target_dependencies(advisory_node ${THERMOCATOR_DEPS})
+  target_include_directories(advisory_node PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
+  )
+  target_compile_features(advisory_node PUBLIC cxx_std_17)
+endif()
 
 # =============================================================================
 # Install
 # =============================================================================
-install(TARGETS
+set(INSTALL_TARGETS
   thermocator
   thermocator_display
   thermal_broadcaster
   decision_node
-  dt_mediator
-  sync_monitor
+)
+
+if(BUILD_DT)
+  list(APPEND INSTALL_TARGETS
+    pose_sync_node
+    advisory_node
+  )
+endif()
+
+install(TARGETS ${INSTALL_TARGETS}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}

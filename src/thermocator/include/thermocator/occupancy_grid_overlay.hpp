@@ -24,14 +24,6 @@ namespace thermocator {
 //
 //   pixel = cold_rgba + (value / 100.0) * (hot_rgba - cold_rgba)
 //
-// This lets subclasses define two distinct behaviors through defaults alone:
-//
-//   Thermal: cold=(blue, a=1.0) hot=(red, a=1.0)
-//            -> color changes, always fully opaque
-//
-//   Action:  cold=(green, a=0.0) hot=(green, a=1.0)
-//            -> color fixed, alpha fades in with value (Gaussian gradient)
-//
 // Unknown cells (-1) are always fully transparent regardless of settings.
 // ----------------------------------------------------------------------------
 
@@ -91,11 +83,6 @@ class OccupancyGridOverlay
     std::string _base_name;
     rclcpp::Logger _logger = rclcpp::get_logger("OccupancyGridOverlay");
 };
-
-// ----------------------------------------------------------------------------
-// Registered plugin variants
-// Same interpolation logic, different defaults.
-// ----------------------------------------------------------------------------
 
 // Thermal: blue (opaque) -> red (opaque) -- pure color gradient
 class ThermalOverlay : public OccupancyGridOverlay {
