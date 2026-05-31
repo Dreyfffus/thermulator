@@ -6,41 +6,84 @@ CONFIG_DIR="${WS_ROOT}/src/thermocator/config"
 RVIZ_CONFIG="${CONFIG_DIR}/thermocator.rviz"
 
 service="${1:-}"
-domain_id="${2:-38}"
-package="${3:-}"
+robot_ip="${2:-}"
+domain_id="${3:-38}"
+package="${4:-}"
 
 SETUP="source /opt/ros/jazzy/setup.bash && \
        source ${WS_ROOT}/install/setup.bash && \
        export TURTLEBOT3_MODEL=burger && \
        export ROS_DOMAIN_ID=${domain_id}"
 
+SIM_SETUP="source /opt/ros/jazzy/setup.bash && \
+           source ${WS_ROOT}/install/setup.bash && \
+           export TURTLEBOT3_MODEL=burger && \
+           export ROS_DOMAIN_ID=1"
+
+BRIDGE_SETUP="source /opt/ros/jazzy/setup.bash && \
+              source ${WS_ROOT}/install/setup.bash && \
+              export TURTLEBOT3_MODEL=burger"
+
+BRIDGE_CONFIG="${CONFIG_DIR}/domain_bridge.yaml"
+
 if [ -z "$service" ]; then
-    echo "Usage: $0 <service> [domain_id] [package]"
+    echo "Usage: $0 <service> [robot_ip] [domain_id] [package]"
     echo ""
-    echo "Services:"
+    echo "  On robot via SSH (turtlebot3@robot_ip):"
+    echo "  bringup      -- TurtleBot3 bringup (requires robot_ip)"
+    echo ""
+    echo "  Local — robot stack (Domain domain_id, default 38):"
     echo "  teleop       -- keyboard teleoperation"
     echo "  rviz         -- Cartographer SLAM + RViz2 with thermocator config"
     echo "  nav          -- Nav2 navigation stack"
     echo "  lifecycle    -- Nav2 lifecycle manager"
     echo "  thermal      -- ThermalMapBuilder node"
     echo "  broadcaster  -- ThermalBroadcaster (simulated sensor)"
-    echo "  decision     -- DecisionNode (frontier exploration + actioning)"
-    echo "  thermocator  -- Full thermocator pipeline (broadcaster + map builder + decision)"
+    echo "  decision     -- DecisionNode (exploration + actioning)"
+    echo "  thermocator  -- Full thermocator pipeline (broadcaster + thermal + decision)"
     echo "  thermulator  -- Entire stack (Cartographer + Nav2 + thermocator + RViz2)"
-    echo "  sim          -- Gazebo simulation with bridge"
     echo "  map_save     -- Save current map to config folder"
-    echo "  build        -- Build workspace (optional: [package])"
     echo ""
-    echo "Resolved paths:"
+    echo "  Local — digital twin (Domain 1):"
+    echo "  sim          -- Gazebo simulation world"
+    echo "  advisory     -- AdvisoryNode only"
+    echo "  pose_sync    -- PoseSyncNode only"
+    echo "  delta_thermal-- Full DT stack (sim + advisory + pose_sync)"
+    echo ""
+    echo "  Local — bridge (no domain):"
+    echo "  bridge       -- domain_bridge (Domain ${domain_id} <-> Domain 1)"
+    echo ""
+    echo "  Build:"
+    echo "  build        -- Build all packages (optional: [package])"
+    echo "  build_dt     -- Build with digital twin nodes (BUILD_DT=ON)"
+    echo ""
+    echo "  Paths:"
     echo "  Workspace : ${WS_ROOT}"
     echo "  Config    : ${CONFIG_DIR}"
     echo "  RViz2     : ${RVIZ_CONFIG}"
     echo ""
-    echo "domain_id defaults to 38 if not specified"
+    echo "  robot_ip  : required only for 'bringup'"
+    echo "  domain_id : defaults to 38"
+    echo ""
+    echo "  Recommended launch order:"
+    echo "    1. bringup <robot_ip>   -- SSH to robot"
+    echo "    2. rviz                 -- SLAM + RViz2, wait for /map"
+    echo "    3. nav                  -- Nav2"
+    echo "    4. lifecycle            -- activate Nav2 nodes"
+    echo "    5. thermocator          -- thermal pipeline"
+    echo "    6. sim                  -- Gazebo (new terminal)"
+    echo "    7. bridge               -- domain_bridge (new terminal)"
+    echo "    8. delta_thermal        -- advisory + pose_sync (new terminal)"
+    echo ""
+    echo "    Or condensed (stable stack):"
+    echo "    1. bringup <robot_ip>"
+    echo "    2. thermulator"
+    echo "    3. sim"
+    echo "    4. bridge"
+    echo "    5. delta_thermal"
     exit 1
 fi
 
-# Helper: resolve RViz2 arguments
 rviz_args() {
     if [ -f "${RVIZ_CONFIG}" ]; then
         echo "-d ${RVIZ_CONFIG}"
@@ -50,6 +93,23 @@ rviz_args() {
 }
 
 case "$service" in
+
+
+    bringup)
+        if [ -z "$robot_ip" ]; then
+            echo "Error: 'bringup' requires robot_ip"
+            echo "Usage: $0 bringup <robot_ip> [domain_id]"
+            exit 1
+        fi
+        echo "Starting TurtleBot3 bringup on turtlebot3@${robot_ip} (Domain ${domain_id}) ..."
+        ssh turtlebot3@${robot_ip} \
+            "source /opt/ros/jazzy/setup.bash && \
+             export TURTLEBOT3_MODEL=burger && \
+             export ROS_DOMAIN_ID=${domain_id} && \
+             ros2 launch turtlebot3_bringup robot.launch.py"
+        ;;
+
+
     teleop)
         bash -c "${SETUP} && \
                  ros2 run turtlebot3_teleop teleop_keyboard"
@@ -104,18 +164,46 @@ case "$service" in
                  use_sim_time:=false"
         ;;
 
-    sim)
-        bash -c "${SETUP} && \
-                 ros2 launch my_tb3_world sim_with_bridge.launch.py \
-                 use_sim_time:=false \
-                 sync_tolerance_seconds:=0.5"
-        ;;
-
     map_save)
         bash -c "${SETUP} && \
                  ros2 run nav2_map_server map_saver_cli \
                  -f ${CONFIG_DIR}/my_map"
         ;;
+
+
+    sim)
+        bash -c "${SIM_SETUP} && \
+                 ros2 launch my_tb3_world delta_thermulator.launch.py \
+                 use_sim_time:=true"
+        ;;
+
+    advisory)
+        bash -c "${SIM_SETUP} && \
+                 ros2 run thermocator advisory_node"
+        ;;
+
+    pose_sync)
+        bash -c "${SIM_SETUP} && \
+                 ros2 run thermocator pose_sync_node"
+        ;;
+
+    delta_thermal)
+        bash -c "${SIM_SETUP} && \
+                 ros2 launch thermocator delta_thermal.launch.py"
+        ;;
+
+
+    bridge)
+        if [ ! -f "${BRIDGE_CONFIG}" ]; then
+            echo "Error: bridge config not found at ${BRIDGE_CONFIG}"
+            exit 1
+        fi
+        echo "Starting domain_bridge: Domain ${domain_id} <-> Domain 1"
+        bash -c "${BRIDGE_SETUP} && \
+                 ros2 run domain_bridge domain_bridge \
+                 --ros-args -p config_file:=${BRIDGE_CONFIG}"
+        ;;
+
 
     build)
         if [ -n "$package" ]; then
@@ -133,10 +221,27 @@ case "$service" in
         fi
         ;;
 
+    build_dt)
+        if [ -n "$package" ]; then
+            echo "Building package (with DT nodes): $package"
+            bash -c "${SETUP} && \
+                     cd ${WS_ROOT} && \
+                     colcon build --packages-select ${package} --symlink-install \
+                     --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+                                  -DBUILD_DT=ON"
+        else
+            echo "Building all packages (with DT nodes) ..."
+            bash -c "${SETUP} && \
+                     cd ${WS_ROOT} && \
+                     colcon build --symlink-install \
+                     --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+                                  -DBUILD_DT=ON"
+        fi
+        ;;
+
     *)
         echo "Error: unknown service '$service'"
         echo "Run $0 without arguments to see usage"
         exit 1
         ;;
 esac
-

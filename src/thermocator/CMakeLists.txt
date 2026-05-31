@@ -5,16 +5,8 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# =============================================================================
-# Option: build digital twin nodes (requires ros_gz_interfaces + Gazebo)
-# Off by default so the physical robot build has no Gazebo dependency.
-# Usage: colcon build --cmake-args -DBUILD_DT=ON
-# =============================================================================
 option(BUILD_DT "Build digital twin nodes (requires ros_gz_interfaces)" OFF)
 
-# =============================================================================
-# Core dependencies (always required)
-# =============================================================================
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(tf2 REQUIRED)
@@ -35,7 +27,6 @@ find_package(rclcpp_action REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 
-# Digital twin dependency — only resolved when BUILD_DT=ON
 if(BUILD_DT)
   find_package(ros_gz_interfaces REQUIRED)
 endif()
@@ -55,9 +46,6 @@ set(THERMOCATOR_DEPS
   visualization_msgs
 )
 
-# =============================================================================
-# decision_node
-# =============================================================================
 add_executable(decision_node
   src/decision_node.cpp
   src/action_grid.cpp
@@ -69,9 +57,6 @@ target_include_directories(decision_node PUBLIC
 )
 target_compile_features(decision_node PUBLIC cxx_std_17)
 
-# =============================================================================
-# thermocator (thermal map builder)
-# =============================================================================
 add_executable(thermocator
   src/thermocator.cpp
   src/map_builder.cpp
@@ -84,9 +69,6 @@ target_include_directories(thermocator PUBLIC
 )
 target_compile_features(thermocator PUBLIC cxx_std_17)
 
-# =============================================================================
-# thermal_broadcaster
-# =============================================================================
 add_executable(thermal_broadcaster
   src/thermal_broadcaster.cpp
 )
@@ -97,9 +79,6 @@ target_include_directories(thermal_broadcaster PUBLIC
 )
 target_compile_features(thermal_broadcaster PUBLIC cxx_std_17)
 
-# =============================================================================
-# thermocator_display -- RViz2 plugin shared library
-# =============================================================================
 add_library(thermocator_display SHARED
   src/occupancy_grid_overlay.cpp
   include/thermocator/occupancy_grid_overlay.hpp
@@ -129,18 +108,14 @@ target_compile_options(thermocator_display PRIVATE
 set_property(TARGET thermocator_display PROPERTY AUTOMOC ON)
 pluginlib_export_plugin_description_file(rviz_common plugin_description.xml)
 
-# =============================================================================
-# Digital twin nodes — only built when BUILD_DT=ON
-# =============================================================================
 if(BUILD_DT)
   set(DT_DEPS
     ${THERMOCATOR_DEPS}
     ros_gz_interfaces
   )
 
-  # pose_sync_node — teleports Gazebo sim robot to real robot's pose
   add_executable(pose_sync_node
-    src/pose_sync_node.cpp
+    src/pose_sync.cpp
   )
   ament_target_dependencies(pose_sync_node ${DT_DEPS})
   target_include_directories(pose_sync_node PUBLIC
@@ -149,7 +124,6 @@ if(BUILD_DT)
   )
   target_compile_features(pose_sync_node PUBLIC cxx_std_17)
 
-  # advisory_node — runs detection in Domain 1 and publishes /advisory/goal
   add_executable(advisory_node
     src/advisory_node.cpp
   )
@@ -161,9 +135,6 @@ if(BUILD_DT)
   target_compile_features(advisory_node PUBLIC cxx_std_17)
 endif()
 
-# =============================================================================
-# Install
-# =============================================================================
 set(INSTALL_TARGETS
   thermocator
   thermocator_display

@@ -1,19 +1,3 @@
-// ============================================================
-//  PoseSyncNode
-//
-//  Runs in Domain 1 (sim side).
-//  Reads the real robot's map→base_footprint TF (bridged from
-//  Domain 0) and teleports the Gazebo sim robot to match.
-//
-//  Uses Gazebo's /world/<name>/set_pose service which bypasses
-//  the physics engine — it is a supported position override,
-//  not a velocity command.  The physics engine then simulates
-//  forward from the new position.
-//
-//  Rate-limited and deadband-filtered to avoid contact solver
-//  explosions that occur when the robot is teleported into
-//  wall geometry on consecutive physics steps.
-// ============================================================
 
 #include <chrono>
 #include <cmath>
@@ -85,7 +69,6 @@ class PoseSyncNode : public rclcpp::Node {
         const double qz = transform.transform.rotation.z;
         const double qw = transform.transform.rotation.w;
 
-        //  Deadband check
         const double dt = std::sqrt(
             std::pow(tx - last_tx_, 2) + std::pow(ty - last_ty_, 2));
         const double last_yaw = std::atan2(2.0 * last_qw_ * last_qz_,
@@ -97,7 +80,6 @@ class PoseSyncNode : public rclcpp::Node {
         if (dt < translation_deadband_ && dr < rotation_deadband_)
             return;
 
-        //  Service availability
         if (!set_pose_client_->wait_for_service(std::chrono::milliseconds(50))) {
             RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
                                  "PoseSyncNode: /world/%s/set_pose not available",
@@ -105,7 +87,6 @@ class PoseSyncNode : public rclcpp::Node {
             return;
         }
 
-        //  Build request
         auto req = std::make_shared<ros_gz_interfaces::srv::SetEntityPose::Request>();
         req->entity.name = robot_entity_name_;
         req->entity.type = ros_gz_interfaces::msg::Entity::MODEL;
@@ -146,13 +127,11 @@ class PoseSyncNode : public rclcpp::Node {
     double rotation_deadband_;
     double robot_spawn_z_;
 
-    //  Deadband state
     double last_tx_ = 1e9;
     double last_ty_ = 1e9;
     double last_qz_ = 0.0;
     double last_qw_ = 1.0;
 
-    //  ROS handles
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
     rclcpp::Client<ros_gz_interfaces::srv::SetEntityPose>::SharedPtr set_pose_client_;

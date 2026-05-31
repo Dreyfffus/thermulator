@@ -1,15 +1,30 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 attach="$1"
 service="${2:-}"
 package="${3:-}"
 
+ROBOT_DOMAIN_ID=38
+SIM_DOMAIN_ID=1
+
 SETUP="source /opt/ros/jazzy/setup.bash && \
        source /opt/turtlebot3_ws/install/setup.bash && \
        source /ws/install/setup.bash && \
-       export TURTLEBOT3_MODEL=burger"
+       export TURTLEBOT3_MODEL=burger && \
+       export ROS_DOMAIN_ID=${ROBOT_DOMAIN_ID}"
+
+DT_SETUP="source /opt/ros/jazzy/setup.bash && \
+       source /opt/turtlebot3_ws/install/setup.bash && \
+       source /ws/install/setup.bash && \
+       export TURTLEBOT3_MODEL=burger && \
+       export ROS_DOMAIN_ID=${SIM_DOMAIN_ID}"
+
+BRIDGE_SETUP="source /opt/ros/jazzy/setup.bash && \
+              source /opt/turtlebot3_ws/install/setup.bash && \
+              source /ws/install/setup.bash && \
+              export TURTLEBOT3_MODEL=burger"
 
 RVIZ_CONFIG="/ws/src/thermocator/config/thermocator.rviz"
+BRIDGE_CONFIG="/ws/src/thermocator/config/domain_bridge.yaml"
 
 ensure_container() {
     if ! docker ps --format '{{.Names}}' | grep -q "^turtlebot3_container$"; then
@@ -38,15 +53,22 @@ if [ -z "$attach" ]; then
     echo "Services (remote):"
     echo "  teleop       -- keyboard teleoperation"
     echo "  rviz         -- Cartographer SLAM + RViz2 with thermocator config"
-    echo "  sim          -- Gazebo simulation world"
+    echo "  sim          -- Gazebo simulation world (Domain ${SIM_DOMAIN_ID})"
     echo "  nav          -- Nav2 navigation stack"
     echo "  lifecycle    -- Nav2 lifecycle manager"
     echo "  thermal      -- ThermalMapBuilder node"
     echo "  broadcaster  -- ThermalBroadcaster (simulated sensor)"
     echo "  decision     -- DecisionNode (frontier exploration + actioning)"
-    echo "  launch       -- Full thermocator pipeline (broadcaster + map builder + decision)"
-    echo "  stack        -- Entire stack (Cartographer + Nav2 + thermocator + RViz2)"
+    echo "  thermocator  -- Full thermocator pipeline (broadcaster + map builder + decision)"
+    echo "  thermulator  -- Entire stack (Cartographer + Nav2 + thermocator + RViz2)"
     echo "  build        -- Build workspace (optional: [package])"
+    echo ""
+    echo "  Digital twin (Domain ${SIM_DOMAIN_ID} <-> Domain ${ROBOT_DOMAIN_ID}):"
+    echo "  bridge       -- domain_bridge only"
+    echo "  advisory     -- AdvisoryNode only"
+    echo "  pose_sync    -- PoseSyncNode only"
+    echo "  delta_thermal-- Full DT stack (bridge + advisory + pose_sync)"
+    echo "  build_dt     -- Build workspace with digital twin nodes (BUILD_DT=ON)"
     exit 1
 fi
 
@@ -72,6 +94,7 @@ case "$attach" in
         ensure_container
         echo "Executing '$service' ..."
         case "$service" in
+
             teleop)
                 docker exec -it turtlebot3_container bash -c \
                     "${SETUP} && \
@@ -89,6 +112,12 @@ case "$attach" in
                 docker exec -it turtlebot3_container bash -c \
                     "${SETUP} && \
                      ros2 launch my_tb3_world new_world.launch.py"
+                ;;
+
+            dt)
+                docker exec -it turtlebot3_container bash -c \
+                    "${DT_SETUP} && \
+                     ros2 launch my_tb3_world delta_thermulator.launch.py"
                 ;;
 
             nav)
@@ -131,14 +160,14 @@ case "$attach" in
                      --ros-args -p use_sim_time:=true"
                 ;;
 
-            launch)
+            thermocator)
                 docker exec -it turtlebot3_container bash -c \
                     "${SETUP} && \
                      ros2 launch thermocator thermocator.launch.py \
                      use_sim_time:=true"
                 ;;
 
-            stack)
+            thermulator)
                 docker exec -it turtlebot3_container bash -c \
                     "${SETUP} && \
                      ros2 launch thermocator thermulator.launch.py \
@@ -162,6 +191,52 @@ case "$attach" in
                 fi
                 ;;
 
+
+            bridge)
+                docker exec -it turtlebot3_container bash -c \
+                    "${BRIDGE_SETUP} && \
+                     ros2 run domain_bridge domain_bridge \
+                     --ros-args -p config_file:=${BRIDGE_CONFIG}"
+                ;;
+
+            advisory)
+                docker exec -it turtlebot3_container bash -c \
+                    "${SETUP} && \
+                     ros2 run thermocator advisory_node"
+                ;;
+
+            pose_sync)
+                docker exec -it turtlebot3_container bash -c \
+                    "${SETUP} && \
+                     ros2 run thermocator pose_sync_node"
+                ;;
+
+            delta_thermal)
+                docker exec -it turtlebot3_container bash -c \
+                    "${BRIDGE_SETUP} && \
+                     export ROS_DOMAIN_ID=${SIM_DOMAIN_ID}
+                     ros2 launch thermocator delta_thermal.launch.py"
+                ;;
+
+            build_dt)
+                if [ -n "$package" ]; then
+                    echo "Building package (with DT nodes): $package"
+                    docker exec -it turtlebot3_container bash -c \
+                        "${SETUP} && \
+                         cd /ws && colcon build \
+                         --packages-select ${package} --symlink-install \
+                         --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+                                      -DBUILD_DT=ON"
+                else
+                    echo "Building all packages (with DT nodes) ..."
+                    docker exec -it turtlebot3_container bash -c \
+                        "${SETUP} && \
+                         cd /ws && colcon build --symlink-install \
+                         --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+                                      -DBUILD_DT=ON"
+                fi
+                ;;
+
             *)
                 echo "Error: unknown service '$service'"
                 echo "Run $0 without arguments to see usage"
@@ -176,4 +251,3 @@ case "$attach" in
         exit 1
         ;;
 esac
-

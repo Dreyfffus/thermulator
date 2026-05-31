@@ -1,5 +1,5 @@
 # ============================================================
-#  domain_bridge_config.yaml
+#  domain_bridge.yaml
 #
 #  Install domain_bridge:
 #    sudo apt install ros-jazzy-domain-bridge
@@ -15,13 +15,13 @@
 
 domain_bridge:
   topics:
-    # ── Domain 0 → Domain 1 (real sensor state into sim) ─────────────────────
+    # ── Domain 38 → Domain 1 (real sensor state into sim) ─────────────────────
 
     - topic_name: /map
       type: nav_msgs/msg/OccupancyGrid
-      from_domain: 0
+      from_domain: 38
       to_domain: 1
-      qos_options:
+      qos:
         reliability: reliable
         durability: transient_local
         history: keep_last
@@ -29,9 +29,9 @@ domain_bridge:
 
     - topic_name: /thermal_map
       type: nav_msgs/msg/OccupancyGrid
-      from_domain: 0
+      from_domain: 38
       to_domain: 1
-      qos_options:
+      qos:
         reliability: reliable
         durability: transient_local
         history: keep_last
@@ -39,9 +39,9 @@ domain_bridge:
 
     - topic_name: /global_costmap/costmap
       type: nav_msgs/msg/OccupancyGrid
-      from_domain: 0
+      from_domain: 38
       to_domain: 1
-      qos_options:
+      qos:
         reliability: reliable
         durability: transient_local
         history: keep_last
@@ -49,18 +49,18 @@ domain_bridge:
 
     - topic_name: /tf
       type: tf2_msgs/msg/TFMessage
-      from_domain: 0
+      from_domain: 38
       to_domain: 1
-      qos_options:
+      qos:
         reliability: best_effort
         history: keep_last
         depth: 100
 
     - topic_name: /tf_static
       type: tf2_msgs/msg/TFMessage
-      from_domain: 0
+      from_domain: 38
       to_domain: 1
-      qos_options:
+      qos:
         reliability: reliable
         durability: transient_local
         history: keep_last
@@ -73,8 +73,8 @@ domain_bridge:
     - topic_name: /advisory/goal
       type: geometry_msgs/msg/PoseStamped
       from_domain: 1
-      to_domain: 0
-      qos_options:
+      to_domain: 38
+      qos:
         reliability: reliable
         history: keep_last
         depth: 1

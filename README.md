@@ -1,32 +1,44 @@
 # Thermocator
 
-A ROS2 Jazzy package for thermal temperature mapping and autonomous exploration, designed for the TurtleBot3 Burger robot. It includes nodes for thermal map building, frontier-based navigation, and an RViz2 visualization plugin.
+A ROS2 Jazzy package for thermal temperature mapping and autonomous exploration, designed for the TurtleBot3 Burger robot. It includes nodes for thermal map building, coverage-based navigation, an advisory digital twin, and an RViz2 visualization plugin.
 
 ## Prerequisites
 
-This project is developed on WSL Ubuntu 24.04 LTS and compiled with `colcon` inside a Docker image based on `osrf/ros:jazzy-desktop-full`.
+Two supported setups:
 
-External dependencies:
-
+**Lab laptop (native Ubuntu 24.04)**
 - ROS2 Jazzy (full desktop)
-- RViz2
-- Nav2
-- Cartographer ROS
-- Gazebo with ROS bridge (simulation only)
+- Nav2, Cartographer ROS
+- Gazebo with ROS bridge (for digital twin)
 - TurtleBot3 packages
+
+**Home (WSL Ubuntu 24.04 + Docker)**
+- Docker with the provided `turtlebot3_ws` image
+- WSLg or X11 forwarding for display
 
 > [!NOTE]
 > Setup instructions are available in `SETUP.pdf` included in this repository, or on Canvas under **"Setting up your workspace in WSL.pdf"**.
 
 ---
 
+## Domain Architecture
+
+Two ROS2 domain IDs are in use:
+
+| Domain | Purpose |
+|---|---|
+| `38` | Physical robot stack (or robot sim in home setup) |
+| `1` | Digital twin Gazebo sim + advisory nodes |
+
+The `domain_bridge` node connects the two domains. It must be launched without `ROS_DOMAIN_ID` set — it manages both domains internally.
+
+---
+
 ## Build Instructions
 
-This is an `ament_cmake` package built with `colcon`.
+### Lab laptop
 
-### Linux
-
-Run the following in every terminal before building or running anything:
+Source the environment in every terminal:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -35,90 +47,115 @@ export TURTLEBOT3_MODEL=burger
 export ROS_DOMAIN_ID=38
 ```
 
-Then build:
+Build:
 
 ```bash
-# Build the entire workspace
-colcon build
-
-# Build only this package
-colcon build --packages-select thermocator
-
-# Build with symlinked install (recommended for fast yaml/config iteration)
+# Standard build
 colcon build --packages-select thermocator --symlink-install
+
+# With digital twin nodes (requires ros_gz_interfaces)
+colcon build --packages-select thermocator --symlink-install \
+  --cmake-args -DBUILD_DT=ON
 ```
 
 > [!TIP]
-> With `--symlink-install`, changes to yaml and config files take effect immediately on the next launch without rebuilding.
+> `--symlink-install` means changes to yaml and config files take effect immediately without rebuilding.
 
-### Docker
+### Docker (home/WSL)
 
-Start a container with the workspace mounted:
+Start a container:
 
 ```bash
-docker run --rm -it \
-  --name turtlebot3_container \
-  --net=host \
-  -e DISPLAY=$DISPLAY \
-  -v /tmp/.X11-unix:/tmp/.X11-unix \
-  -v ~/turtlebot3_ws:/ws \
-  turtlebot3_ws bash
+dock start
 ```
 
 Inside the container:
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source /opt/turtlebot3_ws/install/setup.bash
-rosdep install -i --from-path src --rosdistro jazzy -y
-colcon build --packages-select thermocator
+cd /ws
+colcon build --packages-select thermocator my_tb3_world --symlink-install
 source install/setup.bash
 ```
 
----
-
-## Running the Package
-
-There are three ways to run the package: via the provided **scripts**, via **launch files**, or **manually** node by node. The launch files and scripts handle the correct startup order automatically.
-
-> [!NOTE]
-> The decision node, thermal map builder, and broadcaster will wait for their required topics before doing anything. It is safe to start them before Nav2 or Cartographer are fully up.
-
----
-
-### Scripts
-
-All scripts are in `scripts/bin/`. They can be run directly or added to your PATH by sourcing `scripts/install/setup.bash`.
-
-#### `robot` — Linux host
-
-Runs ROS2 nodes directly on the host machine. Automatically sources the environment. All paths are resolved relative to the script location.
+With digital twin nodes:
 
 ```bash
-robot <service> [domain_id] [package]
+colcon build --packages-select thermocator my_tb3_world --symlink-install \
+  --cmake-args -DBUILD_DT=ON
 ```
 
-`domain_id` defaults to `38` if not provided.
+Or use the script from the host:
+
+```bash
+dock remote build               # all packages
+dock remote build thermocator   # selective
+dock remote build_dt            # with DT nodes
+```
+
+---
+
+## Scripts
+
+All scripts are in `scripts/bin/`. Source `scripts/install/setup.bash` to add them to your PATH.
+
+### `robot` — lab laptop
+
+Runs everything locally. `bringup` is the only service that SSH's into the robot.
+
+```bash
+robot <service> [robot_ip] [domain_id] [package]
+```
+
+`domain_id` defaults to `38`. `robot_ip` is only required for `bringup`.
+
+#### Robot services (SSH)
+
+| Service | What it does |
+|---|---|
+| `bringup <robot_ip>` | SSH into robot and start TurtleBot3 bringup |
+
+#### Local services — robot stack (Domain 38)
 
 | Service | What it runs |
 |---|---|
 | `teleop` | Keyboard teleoperation |
 | `rviz` | Cartographer SLAM + RViz2 |
-| `nav` | Nav2 with thermocator params file |
+| `nav` | Nav2 with thermocator params |
 | `lifecycle` | Nav2 lifecycle manager |
-| `broadcaster` | Thermal sensor publisher |
 | `thermal` | Thermal map builder |
-| `decision` | Decision / frontier exploration node |
-| `thermocator` | Full thermocator stack (staggered) |
-| `thermulator` | Entire system: SLAM + Nav2 + thermocator (staggered) |
-| `map_save` | Saves current map to config folder |
-| `build` | Builds the workspace. Pass package name as third arg to build selectively |
+| `broadcaster` | Thermal sensor publisher |
+| `decision` | Decision node |
+| `thermocator` | Full thermocator pipeline (staggered) |
+| `thermulator` | Entire stack: SLAM + Nav2 + thermocator (staggered) |
+| `map_save` | Save current map to config folder |
+
+#### Local services — digital twin (Domain 1)
+
+| Service | What it runs |
+|-----------------|-------------|
+| `sim`           | Gazebo sim on Domain 1 (`delta_thermulator.launch.py`) |
+| `advisory`      | Advisory node only |
+| `pose_sync`     | Pose sync node only |
+| `delta_thermal` | Full DT stack: advisory + pose_sync (`delta_thermal_launch.py`) |
+
+#### Local services — bridge
+
+| Service | What it runs |
+|---|---|
+| `bridge` | `domain_bridge` connecting Domain 38 ↔ Domain 1 |
+
+#### Build
+
+| Service | What it runs |
+|---|---|
+| `build [package]` | Standard build |
+| `build_dt [package]` | Build with `BUILD_DT=ON` |
 
 ---
 
-#### `dock` — Docker
+### `dock` — Docker (home/WSL)
 
-Manages a persistent Docker container (`turtlebot3_container`). Starts the container automatically if not already running.
+Manages a persistent container (`turtlebot3_container`). Starts it automatically if not running.
 
 ```bash
 dock <start | attach | remote> [service] [package]
@@ -126,97 +163,175 @@ dock <start | attach | remote> [service] [package]
 
 | Command | What it does |
 |---|---|
-| `start` | Starts a new interactive container session with full environment sourced |
-| `attach` | Opens a shell into an already-running container |
-| `remote <service>` | Runs a specific service inside the container from the host terminal |
+| `start` | Start a new interactive container session |
+| `attach` | Open a shell into the running container |
+| `remote <service>` | Run a service inside the container |
 
-#### `remote` services
+#### Remote services
 
 | Service | What it runs |
 |---|---|
 | `teleop` | Keyboard teleoperation |
-| `sim` | Gazebo simulation world |
-| `rviz` | Cartographer SLAM + RViz2 (`use_sim_time:=True`) |
-| `nav` | Nav2 with thermocator params file |
+| `sim` | Gazebo simulation (`new_world.launch.py`) |
+| `dt` | Gazebo simulation (`delta_thermal.launch.py`) |
+| `rviz` | Cartographer SLAM + RViz2 |
+| `nav` | Nav2 |
 | `lifecycle` | Nav2 lifecycle manager |
-| `broadcaster` | Thermal sensor publisher |
 | `thermal` | Thermal map builder |
-| `decision` | Decision / frontier exploration node |
-| `launch` | Full thermocator pipeline (staggered) |
-| `build` | Builds the workspace inside the container |
+| `broadcaster` | Thermal sensor publisher |
+| `decision` | Decision node |
+| `launch` | Full thermocator pipeline |
+| `stack` | Entire stack: SLAM + Nav2 + thermocator |
+| `build [package]` | Standard build |
+| `build_dt [package]` | Build with `BUILD_DT=ON` |
+| `bridge` | `domain_bridge` (no domain ID — manages both internally) |
+| `advisory` | Advisory node only |
+| `pose_sync` | Pose sync node only |
+| `delta_thermal` | Full DT stack: bridge + advisory + pose_sync |
 
 ---
 
-### Launch Files
+## Launch Files
 
-Two launch files are provided:
+| File | Package | Purpose |
+|---|---|---|
+| `thermocator.launch.py` | `thermocator` | Broadcaster + thermal map builder + decision node |
+| `thermulator.launch.py` | `thermocator` | Full stack: Cartographer + Nav2 + lifecycle + thermocator (staggered) |
+| `delta_thermal.launch.py` | `thermocator` | Digital twin: domain_bridge + advisory + pose_sync |
+| `new_world.launch.py` | `my_tb3_world` | Gazebo sim for home/Docker setup |
+| `delta_thermulator.launch.py` | `my_tb3_world` | Gazebo sim for lab digital twin (sets Domain 1 internally) |
 
-| File | Purpose |
-|---|---|
-| `thermocator.launch.py` | Launches only the thermocator nodes (broadcaster, map builder, decision node). Requires Nav2 and Cartographer to already be running. |
-| `stack.launch.py` | Launches the entire simulation stack: Cartographer + Nav2 + lifecycle manager + thermocator nodes. Simulation only. |
+### thermulator.launch.py
 
-> [!IMPORTANT]
-> Both launch files expose `use_sim_time`. For the real TurtleBot3 on Linux this must be set to `false` — there is no simulation clock. For the Docker simulation setup it must be set to `true`.
-
-#### thermocator.launch.py
-
-```bash
-# Load parameters from yaml (default — uses config/thermocator_params.yaml)
-ros2 launch thermocator thermocator.launch.py
-
-# Override sim time only
-ros2 launch thermocator thermocator.launch.py use_sim_time:=false
-
-# Load a custom params file
-ros2 launch thermocator thermocator.launch.py params_file:=/path/to/your_params.yaml
-
-# Override individual arguments (only used if no valid params file is found)
-ros2 launch thermocator thermocator.launch.py \
-  params_file:=/nonexistent \
-  use_sim_time:=true \
-  zone_centers_x:=[0.0,1.5] \
-  zone_centers_y:=[0.0,-1.0] \
-  zone_peak_temps:=[80.0,60.0] \
-  zone_sigmas:=[1.2,1.2] \
-  cold_threshold:=0.0 \
-  hot_threshold:=80.0 \
-  heat_detection_threshold:=20.0 \
-  scoring_radius:=1.5 \
-  max_frontier_distance:=1.0 \
-  w_boundary:=1.0 \
-  w_thermal_boundary:=3.0 \
-  w_hot_interior:=0.5 \
-  w_cold_interior:=2.0 \
-  revisit_penalty_radius:=0.8 \
-  investigation_duration:=5.0 \
-  control_rate:=1.0
-```
-
-> [!IMPORTANT]
-> If `params_file` points to a valid yaml file, it takes full control and individual arguments are ignored (except `use_sim_time` which is always applied). If the file is not found, individual arguments and their defaults are used.
-
-#### stack.launch.py (simulation only)
-
-```bash
-ros2 launch thermocator stack.launch.py
-```
-
-This launches in the following staggered order:
+Staggered startup order:
 
 | Time | What starts |
 |---|---|
-| 0s | Cartographer SLAM |
-| 5s | Nav2 nodes + lifecycle manager |
-| 10s | Thermal broadcaster |
-| 13s | Thermal map builder |
-| 18s | Decision node |
+| `0s` | Cartographer SLAM + RViz2 |
+| `10s` | Nav2 (`autostart:=false`) |
+| `18s` | Nav2 lifecycle manager |
+| `25s` | Thermocator pipeline |
+
+```bash
+# Simulation
+ros2 launch thermocator thermulator.launch.py use_sim_time:=true
+
+# Real robot
+ros2 launch thermocator thermulator.launch.py use_sim_time:=false
+```
+
+> [!IMPORTANT]
+> `use_sim_time:=false` for the real robot — there is no simulation clock on hardware.
+
+### dt_launch.py
+
+```bash
+ros2 launch thermocator dt_launch.py
+ros2 launch thermocator dt_launch.py world_name:=my_world robot_entity_name:=turtlebot3_burger
+```
+
+> [!NOTE]
+> To find your world name: `ros2 service list | grep set_pose` — the name appears between `/world/` and `/set_pose`. It can also be found in the `<world name="...">` tag of your `.world` file.
 
 ---
 
-### Parameter File
+## Recommended Launch Order
 
-All node parameters can be set in `config/thermocator_params.yaml`. Edit this file to tune behavior without modifying launch files or recompiling.
+### Lab — robot only
+
+```
+Terminal 1: robot bringup <robot_ip>    ← wait for sensors confirmed
+Terminal 2: robot thermulator
+```
+
+### Lab — robot + digital twin
+
+```
+Terminal 1: robot bringup <robot_ip>    ← wait for sensors confirmed
+Terminal 2: robot thermulator
+Terminal 3: robot sim                   ← Gazebo on Domain 1
+Terminal 4: robot bridge                ← connects Domain 38 ↔ Domain 1
+Terminal 5: robot dt                    ← advisory + pose_sync on Domain 1
+```
+
+### Home — simulation only
+
+```
+Terminal 1: dock remote sim             ← wait for Gazebo up
+Terminal 2: dock remote stack
+```
+
+### Home — simulating lab setup (two sims)
+
+Run the "robot" sim on Domain 38 and the digital twin on Domain 1:
+
+```
+Terminal 1: ROS_DOMAIN_ID=38 ros2 launch my_tb3_world sim_home.launch.py
+Terminal 2: ROS_DOMAIN_ID=38 ros2 launch thermocator thermulator.launch.py use_sim_time:=true
+Terminal 3: dock remote sim             ← Domain 1
+Terminal 4: dock remote bridge          ← no domain ID
+Terminal 5: dock remote dt              ← Domain 1
+```
+
+---
+
+## Nodes
+
+### `thermal_broadcaster`
+
+Simulates a thermal sensor by publishing temperature readings based on configurable Gaussian heat zones with configurable noise. On real hardware this node is replaced by an actual sensor driver publishing to the same `/thermal_reading` topic.
+
+**Publishes:** `/thermal_reading` (`sensor_msgs/msg/Temperature`)
+
+---
+
+### `thermocator` (thermal map builder)
+
+Receives thermal readings and the occupancy map from Cartographer. For each reading it looks up the robot's position via TF2 and projects the temperature onto the corresponding grid cell. Builds a thermal occupancy map scored 0–100 relative to `cold_threshold` and `hot_threshold`. Unobserved cells are published as `-1`.
+
+**Subscribes:** `/thermal_reading`, `/map`
+**Publishes:** `/thermal_map` (`nav_msgs/msg/OccupancyGrid`, transient local)
+
+---
+
+### `decision_node`
+
+Autonomous thermal coverage brain. Operates in two phases:
+
+**Phase 1 — Explorer:** Drives thermal coverage using random candidate sampling within an expanding radius. At each cycle, candidate poses are sampled uniformly within the current radius, filtered for navigability (costmap) and thermal coverage state. The best candidate is chosen by corridor gain — an estimate of how many thermally unsampled cells fall within the sensor's proximity radius along the path to that candidate. If no candidates are found the radius expands until it reaches `radius_max`, at which point Phase 1 completes.
+
+**Phase 2 — Actor:** Clusters thermally hot cells into action zones and visits each in nearest-neighbour order. Zone centroids are nudged to the nearest navigable costmap cell before being sent as Nav2 goals.
+
+The decision node optionally consumes `/advisory/goal` from the digital twin. Advisory goals are used if they arrive within a configurable staleness window; otherwise the node falls back to its own detection.
+
+**Subscribes:** `/map`, `/thermal_map`, `/global_costmap/costmap`, `/advisory/goal`
+**Publishes:** `/thermocator/goal_markers`, `/thermocator/action_zones`, `/action_map`
+**Action client:** `navigate_to_pose` (Nav2)
+
+---
+
+### `advisory_node` *(digital twin, BUILD_DT=ON)*
+
+Runs on Domain 1. Receives the real robot's maps and TF via `domain_bridge` and runs the same candidate detection logic as the Explorer. Publishes the best candidate goal as an advisory `PoseStamped` on `/advisory/goal` which is bridged back to Domain 38 for the decision node to consume.
+
+Has no Nav2 client and sends no commands to any robot.
+
+**Subscribes:** `/map`, `/thermal_map`, `/global_costmap/costmap`
+**Publishes:** `/advisory/goal` (`geometry_msgs/msg/PoseStamped`), `/advisory/candidates` (markers)
+
+---
+
+### `pose_sync_node` *(digital twin, BUILD_DT=ON)*
+
+Runs on Domain 1. Reads the real robot's `map → base_footprint` TF (bridged from Domain 38) and teleports the Gazebo sim robot to match using the `/world/<name>/set_pose` service. Rate-limited to 1 Hz with a deadband filter to avoid contact solver instability.
+
+**Requires:** `ros_gz_interfaces`
+
+---
+
+## Parameter File
+
+All node parameters are in `config/thermocator_params.yaml`. Edit without recompiling when using `--symlink-install`.
 
 ```yaml
 thermal_broadcaster:
@@ -244,198 +359,23 @@ decision_node:
   ros__parameters:
     map_frame:                "map"
     robot_frame:              "base_footprint"
-    heat_detection_threshold: 20.0
-    frontier_min_distance:    0.8
-    scoring_radius:           1.5
-    max_frontier_distance:    1.0
-    w_boundary:               1.0
-    w_thermal_boundary:       3.0
-    w_hot_interior:           0.5
-    w_cold_interior:          2.0
-    revisit_penalty_radius:   0.8
-    max_visited_goals:        10
-    investigation_duration:   5.0
-    control_rate:             1.0
+    coverage_threshold:       0.95
+    sensor_coverage_radius:   0.3
+    goal_min_distance:        0.5
+    goal_timeout_seconds:     30.0
+    rescan_interval_seconds:  8.0
+    radius_initial:           1.5
+    radius_step:              0.5
+    radius_max:               8.0
+    samples_per_cycle:        40
+    corridor_bonus:           0.3
+    action_zone_heat_threshold:  60.0
+    action_zone_cluster_radius:  1.5
+    action_zone_base_sigma:      0.4
+    action_delay_seconds:        1.0
+    control_rate:                1.0
+    advisory_stale_secs:         2.0
 ```
-
-> [!NOTE]
-> Parameters not present in the yaml file fall back to their hardcoded defaults.
-
----
-
-### Manual Run
-
-#### Linux — Real Robot
-
-> [!IMPORTANT]
-> Run the following at the top of **each** terminal:
-> ```bash
-> source /opt/ros/jazzy/setup.bash
-> source /opt/turtlebot3_ws/install/setup.bash
-> export TURTLEBOT3_MODEL=burger
-> export ROS_DOMAIN_ID=38
-> ```
-
-**Terminal 1 — Robot hardware** *(on the robot's onboard computer)*
-```bash
-ros2 launch turtlebot3_bringup robot.launch.py
-```
-
-**Terminal 2 — Cartographer SLAM + RViz2**
-```bash
-ros2 launch turtlebot3_cartographer cartographer.launch.py use_sim_time:=False
-```
-
-**Terminal 3 — Nav2**
-```bash
-ros2 launch nav2_bringup navigation_launch.py \
-  use_sim_time:=false \
-  autostart:=false \
-  params_file:=~/turtlebot3_ws/src/thermocator/config/nav2_slam_params.yaml
-```
-
-**Terminal 4 — Nav2 Lifecycle Manager**
-```bash
-ros2 launch thermocator lifecycle_manager.launch.py use_sim_time:=false
-```
-
-**Terminal 5 — Thermocator stack**
-```bash
-ros2 launch thermocator thermocator.launch.py use_sim_time:=false
-```
-
-**Terminal 6 — Teleoperation** *(optional)*
-```bash
-ros2 run turtlebot3_teleop teleop_keyboard
-```
-
----
-
-#### Docker — Simulation
-
-> [!IMPORTANT]
-> The Docker setup requires an open container. Start one with Terminal 1 below before running any other terminal.
-
-> [!WARNING]
-> All commands after Terminal 1 are run from the **host** via `docker exec`. Unless you have added the environment sourcing to `.bashrc` inside the container, every `docker exec` command must source the environment explicitly as shown below.
-
-**Terminal 1 — Start the container**
-```bash
-docker run --rm -it \
-  --name turtlebot3_container \
-  --net=host \
-  -e DISPLAY=$DISPLAY \
-  -v /tmp/.X11-unix:/tmp/.X11-unix \
-  -v ~/turtlebot3_ws:/ws \
-  turtlebot3_ws bash -c \
-  "source /opt/ros/jazzy/setup.bash && \
-   source /opt/turtlebot3_ws/install/setup.bash && \
-   source /ws/install/setup.bash && \
-   export TURTLEBOT3_MODEL=burger && \
-   exec bash"
-```
-
-All following terminals use `docker exec` from the host:
-
-**Terminal 2 — Gazebo simulation**
-```bash
-docker exec -it turtlebot3_container bash -c \
-  "source /opt/ros/jazzy/setup.bash && \
-   source /ws/install/setup.bash && \
-   export TURTLEBOT3_MODEL=burger && \
-   ros2 launch my_tb3_world new_world.launch.py"
-```
-
-**Terminal 3 — Cartographer SLAM + RViz2**
-```bash
-docker exec -it turtlebot3_container bash -c \
-  "source /opt/ros/jazzy/setup.bash && \
-   source /ws/install/setup.bash && \
-   export TURTLEBOT3_MODEL=burger && \
-   ros2 launch turtlebot3_cartographer cartographer.launch.py use_sim_time:=True"
-```
-
-**Terminal 4 — Nav2**
-```bash
-docker exec -it turtlebot3_container bash -c \
-  "source /opt/ros/jazzy/setup.bash && \
-   source /ws/install/setup.bash && \
-   export TURTLEBOT3_MODEL=burger && \
-   ros2 launch nav2_bringup navigation_launch.py \
-   use_sim_time:=True \
-   autostart:=False \
-   params_file:=/ws/src/thermocator/config/nav2_slam_params.yaml"
-```
-
-**Terminal 5 — Nav2 Lifecycle Manager**
-```bash
-docker exec -it turtlebot3_container bash -c \
-  "source /opt/ros/jazzy/setup.bash && \
-   source /ws/install/setup.bash && \
-   export TURTLEBOT3_MODEL=burger && \
-   ros2 launch thermocator lifecycle_manager.launch.py use_sim_time:=true"
-```
-
-**Terminal 6 — Thermocator stack**
-```bash
-docker exec -it turtlebot3_container bash -c \
-  "source /opt/ros/jazzy/setup.bash && \
-   source /ws/install/setup.bash && \
-   export TURTLEBOT3_MODEL=burger && \
-   ros2 launch thermocator thermocator.launch.py use_sim_time:=true"
-```
-
-**Terminal 7 — Teleoperation** *(optional)*
-```bash
-docker exec -it turtlebot3_container bash -c \
-  "source /opt/ros/jazzy/setup.bash && \
-   source /ws/install/setup.bash && \
-   export TURTLEBOT3_MODEL=burger && \
-   ros2 run turtlebot3_teleop teleop_keyboard"
-```
-
-> [!NOTE]
-> For simulation you can launch everything with one command instead of the terminals above:
-> ```bash
-> docker exec -it turtlebot3_container bash -c \
->   "source /opt/ros/jazzy/setup.bash && \
->    source /ws/install/setup.bash && \
->    export TURTLEBOT3_MODEL=burger && \
->    ros2 launch thermocator stack.launch.py use_sim_time:=true"
-> ```
-
----
-
-## Nodes
-
-### `thermal_broadcaster`
-
-Simulates a thermal sensor by publishing temperature readings based on configurable Gaussian heat zones. Adds configurable noise to simulate real sensor variance. On real hardware this node would be replaced by an actual thermal sensor driver publishing to the same `/thermal_reading` topic.
-
-**Publishes:** `/thermal_reading` (`sensor_msgs/msg/Temperature`)
-
----
-
-### `thermocator` (thermal_map_builder)
-
-Receives thermal readings from the broadcaster and the occupancy map from Cartographer. For each reading it looks up the robot's position via TF2 and projects the temperature reading onto the corresponding grid cell. Builds a thermal occupancy map over time where cells are scored 0–100 relative to `cold_threshold` and `hot_threshold`. Cells below `min_confidence` are published as unknown (`-1`).
-
-**Subscribes:** `/thermal_reading`, `/map`
-**Publishes:** `/thermal_map` (`nav_msgs/msg/OccupancyGrid`, transient local)
-
----
-
-### `decision_node`
-
-Autonomous thermal exploration brain. Operates in two phases:
-
-**Phase 1 — Spatial exploration:** When no heat has been detected yet, the robot explores unknown space using standard frontier detection (free cells adjacent to unknown cells), moving toward the nearest unexplored boundary.
-
-**Phase 2 — Thermal boundary mapping:** Once heat is detected, the robot shifts to thermal frontier scoring. Candidates are scored by how many unknown cells sit on the boundary between known and unknown thermal space, with a bonus for boundaries adjacent to hot cells. Known cold cells are penalised heavily. Known hot cells are penalised mildly. Candidates too far from any explored area are discarded entirely (`max_frontier_distance`). Recently visited goals are penalised to prevent orbiting.
-
-**Subscribes:** `/map`, `/thermal_map`
-**Publishes:** `/thermocator/goal_markers` (`visualization_msgs/msg/MarkerArray`)
-**Action client:** `navigate_to_pose` (Nav2)
 
 ---
 
@@ -445,109 +385,31 @@ The package includes a custom RViz2 plugin that overlays the thermal map on top 
 
 ### Setup
 
-```bash
-ros2 launch turtlebot3_cartographer cartographer.launch.py use_sim_time:=true
-```
-
 In RViz2:
 
 1. Set **Fixed Frame** to `map`
-2. **Add** > `RobotModel` > set topic to `/robot_description`
-3. **Add** > `Map` > set topic to `/map`
-4. **Add** > **By Display Type** > scroll to `thermocator` > select `ThermalDisplay` > set topic to `/thermal_map`
+2. **Add** → `Map` → topic `/map`
+3. **File** → **Open Config** → Select `/ws/src/thermocator/config/thermisual.rviz` → If prompted **Discard**
 
-The plugin supports configurable cold and hot colors and transparency, adjustable from the RViz2 Displays panel.
+The plugin supports configurable cold and hot colors and transparency from the Displays panel.
 
 ---
 
-## Digital Twin Integration
+## Digital Twin Architecture
 
-Use the `dt-integration-support` branch for the digital twin demo:
+The digital twin couples a Gazebo simulation to the real robot using domain isolation rather than topic remapping. The two stacks run on separate ROS2 domain IDs and are connected by `domain_bridge`.
 
-```bash
-git switch dt-integration-support
+```
+Domain 38 (robot/robot sim)          Domain 1 (Gazebo DT)
+─────────────────────────            ─────────────────────
+/map              ──────────────────▶ /map
+/thermal_map      ──────────────────▶ /thermal_map
+/global_costmap   ──────────────────▶ /global_costmap
+/tf, /tf_static   ──────────────────▶ /tf, /tf_static
+                  ◀────────────────── /advisory/goal
 ```
 
-Start the Docker environment with display forwarding:
+The `advisory_node` on Domain 1 consumes the bridged maps, runs candidate detection, and publishes goal suggestions back to Domain 38. The `pose_sync_node` keeps the Gazebo robot co-located with the real robot for visualization. Neither node sends velocity commands to anything.
 
-```bash
-./tb3.bash start
-```
-
-Inside the container, build the workspace:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source /opt/turtlebot3_ws/install/setup.bash
-cd /ws
-colcon build --packages-select my_tb3_world thermocator \
-  --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-source install/setup.bash
-export TURTLEBOT3_MODEL=burger
-```
-
-Open new terminals with `./tb3.bash attach` and run:
-
-**Terminal 1 — Gazebo with ROS/Gazebo bridge**
-```bash
-ros2 launch my_tb3_world sim_with_bridge.launch.py use_sim_time:=true
-```
-
-**Terminal 2 — DT mediator, sync monitor, and thermal nodes**
-```bash
-ros2 launch thermocator dt_integration.launch.py \
-  use_sim_time:=true \
-  sync_tolerance_seconds:=0.5
-```
-
-**Terminal 3 — Nav2 with thermal costmap layer**
-```bash
-ros2 launch turtlebot3_navigation2 navigation2.launch.py \
-  use_sim_time:=true \
-  params_file:=/ws/src/thermocator/config/nav2_thermal_params.yaml
-```
-
-### Verification
-
-Check bridge topics are live:
-```bash
-ros2 topic echo /clock --once
-ros2 topic echo /odom --once
-ros2 topic echo /scan --once
-ros2 topic echo /tf --once
-```
-
-Check digital twin topics:
-```bash
-ros2 topic list | grep /dt
-ros2 topic echo /dt/odom --once
-ros2 topic echo /dt/scan --once
-ros2 topic echo /dt/thermal_reading --once
-ros2 topic echo /dt/thermal_map --once
-```
-
-Test command forwarding:
-```bash
-ros2 topic pub --once /dt/cmd_vel geometry_msgs/msg/Twist \
-  "{linear: {x: 0.05}, angular: {z: 0.0}}"
-```
-
-Expected: `/cmd_vel` receives a `TwistStamped` and the robot moves forward in Gazebo.
-
-Healthy sync output looks like:
-```
-Sync ok [odom]
-Sync ok [scan]
-Sync ok [thermal_map]
-```
-
-Check thermal pipeline rates:
-```bash
-ros2 topic hz /thermal_reading
-ros2 topic hz /thermal_map
-```
-
-For the full demo flow see `docs/demo_checklist.md`.
-
-> [!WARNING]
-> Gazebo GUI requires a working display/OpenGL session. In a headless Docker shell `gz sim -g` may fail with a Qt/OpenGL error. Use the full WSLg/X11 Docker session from `./tb3.bash start` for the complete Gazebo movement test.
+> [!IMPORTANT]
+> `domain_bridge` must be launched without `ROS_DOMAIN_ID` set in the environment. Setting it will break one side of the bridge. The `robot bridge` and `dock remote bridge` services handle this correctly.

@@ -77,8 +77,6 @@ class AdvisoryNode : public rclcpp::Node {
                 costmap_ = msg;
             });
 
-        // Evaluate at 1 Hz — no need to be faster than the real robot's
-        // control rate, and the detection is not cheap.
         eval_timer_ = create_wall_timer(
             std::chrono::seconds(1),
             std::bind(&AdvisoryNode::evaluate, this));
@@ -95,7 +93,6 @@ class AdvisoryNode : public rclcpp::Node {
     };
 
     void evaluate() {
-        // Only re-run if maps have changed since last evaluation
         {
             std::lock_guard<std::mutex> lk(map_mutex_);
             if (!map_dirty_)
@@ -205,7 +202,6 @@ class AdvisoryNode : public rclcpp::Node {
             const double wx = rx + ox;
             const double wy = ry + oy;
 
-            // Navigability
             const int cc = static_cast<int>((wx - ci.origin.position.x) / ci.resolution);
             const int cr = static_cast<int>((wy - ci.origin.position.y) / ci.resolution);
             if (cc < 0 || cc >= (int)ci.width || cr < 0 || cr >= (int)ci.height)
@@ -214,7 +210,6 @@ class AdvisoryNode : public rclcpp::Node {
             if (cv < 0 || cv >= 99)
                 continue;
 
-            // Thermal coverage
             const int tc = static_cast<int>((wx - ti.origin.position.x) / ti.resolution);
             const int tr = static_cast<int>((wy - ti.origin.position.y) / ti.resolution);
             if (tc < 0 || tc >= (int)ti.width || tr < 0 || tr >= (int)ti.height) {

@@ -1,102 +1,75 @@
 #!/usr/bin/env python3
 import os
-
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
-    DeclareLaunchArgument,
-    GroupAction,
+    AppendEnvironmentVariable,
     IncludeLaunchDescription,
     SetEnvironmentVariable,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    pkg = get_package_share_directory("thermocator")
-    my_world_pkg = get_package_share_directory("my_tb3_world")
-
-    bridge_config = os.path.join(pkg, "config", "domain_bridge_config.yaml")
-
-    world_name_arg = DeclareLaunchArgument(
-        "world_name",
-        default_value="my_world",
-        description="Gazebo world name (must match the .world file)",
+    launch_file_dir = os.path.join(
+        get_package_share_directory("turtlebot3_gazebo"), "launch"
     )
-    robot_entity_arg = DeclareLaunchArgument(
-        "robot_entity_name",
-        default_value="turtlebot3_burger",
-        description="Gazebo model name of the sim robot",
-    )
+    ros_gz_sim_share = get_package_share_directory("ros_gz_sim")
+    my_pkg_share = get_package_share_directory("my_tb3_world")
 
-    domain_bridge_node = Node(
-        package="domain_bridge",
-        executable="domain_bridge",
-        name="dt_domain_bridge",
-        output="screen",
-        parameters=[{"config_file": bridge_config}],
+    use_sim_time = LaunchConfiguration("use_sim_time", default="true")
+    x_pose = LaunchConfiguration("x_pose", default="0.0")
+    y_pose = LaunchConfiguration("y_pose", default="0.0")
+
+    world = os.path.join(my_pkg_share, "worlds", "new_world.world")
+
+    set_domain = SetEnvironmentVariable("ROS_DOMAIN_ID", "1")
+
+    set_env_vars_resources = AppendEnvironmentVariable(
+        "GZ_SIM_RESOURCE_PATH",
+        os.path.join(get_package_share_directory("turtlebot3_gazebo"), "models"),
     )
 
-    sim_group = GroupAction(
-        [
-            SetEnvironmentVariable("ROS_DOMAIN_ID", "1"),
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    os.path.join(my_world_pkg, "launch", "bringup.launch.py")
-                ),
-                launch_arguments={
-                    "use_sim_time": "true",
-                }.items(),
-            ),
-            Node(
-                package="thermocator",
-                executable="pose_sync_node",
-                name="pose_sync_node",
-                output="screen",
-                parameters=[
-                    {
-                        "world_name": LaunchConfiguration("world_name"),
-                        "robot_entity_name": LaunchConfiguration("robot_entity_name"),
-                        "map_frame": "map",
-                        "robot_frame": "base_footprint",
-                        "sync_rate_hz": 1.0,
-                        "translation_deadband": 0.05,
-                        "rotation_deadband": 0.05,
-                        "robot_spawn_z": 0.01,
-                    }
-                ],
-            ),
-            Node(
-                package="thermocator",
-                executable="advisory_node",
-                name="advisory_node",
-                output="screen",
-                parameters=[
-                    {
-                        "map_frame": "map",
-                        "robot_frame": "base_footprint",
-                        "sensor_radius": 0.3,
-                        "goal_min_distance": 0.5,
-                        "coverage_threshold": 0.95,
-                        "radius_initial": 1.5,
-                        "radius_step": 0.5,
-                        "radius_max": 8.0,
-                        "samples_per_cycle": 40,
-                        "corridor_bonus": 0.3,
-                        "advisory_stale_secs": 2.0,
-                    }
-                ],
-            ),
-        ]
+    gzserver_cmd = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(ros_gz_sim_share, "launch", "gz_sim.launch.py")
+        ),
+        launch_arguments={
+            "gz_args": f"-r -s -v2 {world}",
+            "on_exit_shutdown": "true",
+        }.items(),
     )
 
-    return LaunchDescription(
-        [
-            world_name_arg,
-            robot_entity_arg,
-            domain_bridge_node,  # outside the group — no domain ID env
-            sim_group,
-        ]
+    gzclient_cmd = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(ros_gz_sim_share, "launch", "gz_sim.launch.py")
+        ),
+        launch_arguments={
+            "gz_args": "-g -v2",
+            "on_exit_shutdown": "true",
+        }.items(),
     )
+
+    robot_state_publisher_cmd = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(launch_file_dir, "robot_state_publisher.launch.py")
+        ),
+        launch_arguments={"use_sim_time": use_sim_time}.items(),
+    )
+
+    spawn_turtlebot_cmd = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(launch_file_dir, "spawn_turtlebot3.launch.py")
+        ),
+        launch_arguments={"x_pose": x_pose, "y_pose": y_pose}.items(),
+    )
+
+    ld = LaunchDescription()
+    ld.add_action(set_domain)  # must be first
+    ld.add_action(set_env_vars_resources)
+    ld.add_action(gzserver_cmd)
+    ld.add_action(gzclient_cmd)
+    ld.add_action(spawn_turtlebot_cmd)
+    ld.add_action(robot_state_publisher_cmd)
+    return ld
