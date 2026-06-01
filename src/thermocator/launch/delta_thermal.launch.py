@@ -10,7 +10,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     world_name_arg = DeclareLaunchArgument(
         "world_name",
-        default_value="default",
+        default_value="thermaria",
         description="Gazebo world name (must match <world name=...> in .world file)",
     )
     robot_entity_arg = DeclareLaunchArgument(

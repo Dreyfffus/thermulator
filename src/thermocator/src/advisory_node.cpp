@@ -101,6 +101,8 @@ class AdvisoryNode : public rclcpp::Node {
     };
 
     void evaluate() {
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
+                             "[Advisory] entered evaluate()");
         {
             std::lock_guard<std::mutex> lk(map_mutex_);
             if (!map_dirty_)
@@ -124,6 +126,8 @@ class AdvisoryNode : public rclcpp::Node {
             return;
         const double rx = robot_x_;
         const double ry = robot_y_;
+
+        robot_pose_valid_ = false;
 
         const double cov = computeCoverageRatio(*spatial_copy, *thermal_copy);
         RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
