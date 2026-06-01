@@ -1,12 +1,15 @@
+#include "nav_msgs/msg/odometry.hpp"
 #include <cmath>
 #include <mutex>
 #include <optional>
 #include <random>
+#include <rclcpp/subscription.hpp>
 #include <string>
 #include <vector>
 
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
@@ -42,9 +45,6 @@ class AdvisoryNode : public rclcpp::Node {
 
         sample_radius_ = radius_initial_;
 
-        tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
-        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-
         rclcpp::QoS latched(1);
         latched.transient_local().reliable();
 
@@ -75,6 +75,14 @@ class AdvisoryNode : public rclcpp::Node {
             [this](nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
                 std::lock_guard<std::mutex> lk(map_mutex_);
                 costmap_ = msg;
+            });
+
+        odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+            "/odom", rclcpp::QoS(10),
+            [this](nav_msgs::msg::Odometry::SharedPtr msg) {
+                robot_x_ = msg->pose.pose.position.x;
+                robot_y_ = msg->pose.pose.position.y;
+                robot_pose_valid_ = true;
             });
 
         eval_timer_ = create_wall_timer(
@@ -112,9 +120,10 @@ class AdvisoryNode : public rclcpp::Node {
         if (!thermal_copy || !spatial_copy || !costmap_copy)
             return;
 
-        const auto pose = getRobotPose();
-        if (!pose.has_value())
+        if (!robot_pose_valid_)
             return;
+        const double rx = robot_x_;
+        const double ry = robot_y_;
 
         const double cov = computeCoverageRatio(*spatial_copy, *thermal_copy);
         RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
@@ -128,7 +137,7 @@ class AdvisoryNode : public rclcpp::Node {
         }
 
         auto candidates = sampleCandidates(
-            *thermal_copy, *costmap_copy, pose->first, pose->second);
+            *thermal_copy, *costmap_copy, rx, ry);
 
         if (candidates.empty()) {
             sample_radius_ = std::min(sample_radius_ + radius_step_, radius_max_);
@@ -141,7 +150,7 @@ class AdvisoryNode : public rclcpp::Node {
         for (auto &c : candidates)
             c.corridor_gain = estimateCorridorGain(
                 *costmap_copy, *thermal_copy,
-                pose->first, pose->second,
+                rx, ry,
                 c.world_x, c.world_y);
 
         const auto &best = *std::max_element(
@@ -306,20 +315,6 @@ class AdvisoryNode : public rclcpp::Node {
         return total == 0 ? 0.0 : static_cast<double>(covered) / total;
     }
 
-    std::optional<std::pair<double, double>> getRobotPose() const {
-        try {
-            const auto t = tf_buffer_->lookupTransform(
-                map_frame_, robot_frame_,
-                rclcpp::Time(0), rclcpp::Duration::from_seconds(0.1));
-            return std::make_pair(
-                t.transform.translation.x, t.transform.translation.y);
-        } catch (const tf2::TransformException &e) {
-            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 3000,
-                                 "[Advisory] TF: %s", e.what());
-            return std::nullopt;
-        }
-    }
-
     void publishCandidateMarkers(
         const std::vector<Candidate> &candidates,
         const Candidate &best) const {
@@ -390,14 +385,17 @@ class AdvisoryNode : public rclcpp::Node {
     nav_msgs::msg::OccupancyGrid::SharedPtr spatial_map_;
     nav_msgs::msg::OccupancyGrid::SharedPtr costmap_;
 
-    std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
-    std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr thermal_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr spatial_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr costmap_sub_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
     rclcpp::TimerBase::SharedPtr eval_timer_;
+
+    double robot_x_ = 0.0;
+    double robot_y_ = 0.0;
+    bool robot_pose_valid_ = true;
 };
 
 } // namespace thermocator

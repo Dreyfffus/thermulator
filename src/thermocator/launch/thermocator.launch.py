@@ -70,6 +70,9 @@ def generate_launch_description():
     samples_per_cycle_arg = DeclareLaunchArgument(
         "samples_per_cycle", default_value="40"
     )
+    advisory_stale_secs_arg = DeclareLaunchArgument(
+        "advisory_stale_secs", default_value="3.0"
+    )
     corridor_bonus_arg = DeclareLaunchArgument("corridor_bonus", default_value="0.3")
 
     # Decision node -- Phase 2
@@ -169,6 +172,7 @@ def generate_launch_description():
                     "radius_step": f("radius_step"),
                     "radius_max": f("radius_max"),
                     "samples_per_cycle": i("samples_per_cycle"),
+                    "advisory_stale_secs": f("advisory_stale_secs"),
                     "corridor_bonus": f("corridor_bonus"),
                     "action_zone_heat_threshold": f("action_zone_heat_threshold"),
                     "action_zone_cluster_radius": f("action_zone_cluster_radius"),
@@ -240,6 +244,7 @@ def generate_launch_description():
             radius_step_arg,
             radius_max_arg,
             samples_per_cycle_arg,
+            advisory_stale_secs_arg,
             corridor_bonus_arg,
             action_zone_heat_threshold_arg,
             action_zone_cluster_radius_arg,

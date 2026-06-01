@@ -42,6 +42,7 @@ decision_node:
     radius_step: 0.5
     radius_max: 8.0
     samples_per_cycle: 40
+    advisory_stale_secs: 4.0
     corridor_bonus: 0.3
 
     action_zone_heat_threshold: 60.0

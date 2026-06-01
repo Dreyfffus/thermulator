@@ -194,14 +194,9 @@ case "$service" in
 
 
     bridge)
-        if [ ! -f "${BRIDGE_CONFIG}" ]; then
-            echo "Error: bridge config not found at ${BRIDGE_CONFIG}"
-            exit 1
-        fi
-        echo "Starting domain_bridge: Domain ${domain_id} <-> Domain 1"
-        bash -c "${BRIDGE_SETUP} && \
-                 ros2 run domain_bridge domain_bridge \
-                 --ros-args -p config_file:=${BRIDGE_CONFIG}"
+        bash -c "source /opt/ros/jazzy/setup.bash && \
+             source ${WS_ROOT}/install/setup.bash && \
+             ros2 launch thermocator dt_bridge.launch.py"
         ;;
 
 

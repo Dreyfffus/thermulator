@@ -1,8 +1,10 @@
 
+#include "nav_msgs/msg/odometry.hpp"
 #include <chrono>
 #include <cmath>
 #include <string>
 
+#include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <ros_gz_interfaces/msg/entity.hpp>
 #include <ros_gz_interfaces/srv/set_entity_pose.hpp>
@@ -32,11 +34,18 @@ class PoseSyncNode : public rclcpp::Node {
         rotation_deadband_ = get_parameter("rotation_deadband").as_double();
         robot_spawn_z_ = get_parameter("robot_spawn_z").as_double();
 
-        tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
-        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-
         set_pose_client_ = create_client<ros_gz_interfaces::srv::SetEntityPose>(
             "/world/" + world_name_ + "/set_pose");
+
+        odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+            "/odom", rclcpp::QoS(10),
+            [this](nav_msgs::msg::Odometry::SharedPtr msg) {
+                robot_x_ = msg->pose.pose.position.x;
+                robot_y_ = msg->pose.pose.position.y;
+                robot_qz_ = msg->pose.pose.orientation.z;
+                robot_qw_ = msg->pose.pose.orientation.w;
+                robot_pose_valid_ = true;
+            });
 
         const auto period = std::chrono::duration<double>(1.0 / sync_rate_hz_);
         sync_timer_ = create_wall_timer(
@@ -52,22 +61,13 @@ class PoseSyncNode : public rclcpp::Node {
 
   private:
     void syncPose() {
-        geometry_msgs::msg::TransformStamped transform;
-        try {
-            transform = tf_buffer_->lookupTransform(
-                map_frame_, robot_frame_,
-                rclcpp::Time(0),
-                rclcpp::Duration::from_seconds(0.1));
-        } catch (const tf2::TransformException &e) {
-            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 3000,
-                                 "PoseSyncNode: TF lookup failed: %s", e.what());
+        if (!robot_pose_valid_)
             return;
-        }
 
-        const double tx = transform.transform.translation.x;
-        const double ty = transform.transform.translation.y;
-        const double qz = transform.transform.rotation.z;
-        const double qw = transform.transform.rotation.w;
+        const double tx = robot_x_;
+        const double ty = robot_y_;
+        const double qz = robot_qz_;
+        const double qw = robot_qw_;
 
         const double dt = std::sqrt(
             std::pow(tx - last_tx_, 2) + std::pow(ty - last_ty_, 2));
@@ -127,14 +127,19 @@ class PoseSyncNode : public rclcpp::Node {
     double rotation_deadband_;
     double robot_spawn_z_;
 
+    double robot_x_ = 0.0;
+    double robot_y_ = 0.0;
+    double robot_qz_ = 0.0;
+    double robot_qw_ = 1.0;
+    bool robot_pose_valid_ = false;
+
     double last_tx_ = 1e9;
     double last_ty_ = 1e9;
     double last_qz_ = 0.0;
     double last_qw_ = 1.0;
 
-    std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
-    std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
     rclcpp::Client<ros_gz_interfaces::srv::SetEntityPose>::SharedPtr set_pose_client_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::TimerBase::SharedPtr sync_timer_;
 };
 

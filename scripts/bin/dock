@@ -195,8 +195,7 @@ case "$attach" in
             bridge)
                 docker exec -it turtlebot3_container bash -c \
                     "${BRIDGE_SETUP} && \
-                     ros2 run domain_bridge domain_bridge \
-                     --ros-args -p config_file:=${BRIDGE_CONFIG}"
+                     ros2 launch thermocator thermic_bridge.launch.py"
                 ;;
 
             advisory)

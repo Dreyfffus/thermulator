@@ -1,9 +1,11 @@
 #include "thermocator/decision_node.hpp"
+#include "geometry_msgs/msg/pose_stamped.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <rclcpp/logging.hpp>
 #include <string>
@@ -55,6 +57,41 @@ void Explorer::handleScanning() {
         return;
     }
 
+    if (ctx_.advisory_goal.advisory_received) {
+        const double age = (ctx_.clock->now() - ctx_.advisory_goal.advisory_stamp).seconds();
+        if (age <= default_params_.advisory_stale_secs) {
+
+            const auto &ci = costmap_copy->info;
+            const int cc = static_cast<int>(
+                (ctx_.advisory_goal.advisory_goal_x - ci.origin.position.x) / ci.resolution);
+            const int cr = static_cast<int>(
+                (ctx_.advisory_goal.advisory_goal_y - ci.origin.position.y) / ci.resolution);
+            const bool navigable =
+                cc >= 0 && cc < (int)ci.width &&
+                cr >= 0 && cr < (int)ci.height &&
+                costmap_copy->data[static_cast<size_t>(cr) * ci.width + cc] >= 0 &&
+                costmap_copy->data[static_cast<size_t>(cr) * ci.width + cc] < 99;
+
+            if (navigable) {
+                RCLCPP_INFO(ctx_.logger,
+                            "[Explorer] Using advisory goal (%.2f,%.2f) age=%.1fs",
+                            ctx_.advisory_goal.advisory_goal_x, ctx_.advisory_goal.advisory_goal_y, age);
+
+                ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
+                _current_goal_x = ctx_.advisory_goal.advisory_goal_x;
+                _current_goal_y = ctx_.advisory_goal.advisory_goal_y;
+                _current_goal_source = GoalSource::ADVISORY;
+                publishGoalMarker(_current_goal_source);
+                sendGoal(ctx_.advisory_goal.advisory_goal_x, ctx_.advisory_goal.advisory_goal_y);
+                ctx_.advisory_goal.advisory_received = false; // consume it
+                state_ = State::NAVIGATING;
+                return;
+            }
+        }
+    }
+
+    RCLCPP_INFO(ctx_.logger, "[Explorer] Advisory goal is stale or not published, falling back to local");
+
     auto ft = detectTargets(
         *thermal_copy, *costmap_copy,
         pose->first, pose->second);
@@ -72,7 +109,8 @@ void Explorer::handleScanning() {
         ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
         _current_goal_x = best.world_x;
         _current_goal_y = best.world_y;
-        publishGoalMarker();
+        _current_goal_source = GoalSource::LOCAL;
+        publishGoalMarker(_current_goal_source);
         sendGoal(best.world_x, best.world_y);
         state_ = State::NAVIGATING;
         return;
@@ -304,13 +342,24 @@ void Explorer::checkTimeout() {
     }
 }
 
-void Explorer::publishGoalMarker() {
+void Explorer::publishGoalMarker(GoalSource source) {
     visualization_msgs::msg::MarkerArray ma;
     visualization_msgs::msg::Marker m;
+
+    if (source == GoalSource::ADVISORY) {
+        m.color.r = 0.0f;
+        m.color.g = 0.5f;
+        m.color.b = 1.0f;
+    } else {
+        m.color.r = 0.4f;
+        m.color.g = 1.0f;
+        m.color.b = 0.0f;
+    }
+
     m.header.stamp = ctx_.clock->now();
     m.header.frame_id = ctx_.map_frame;
     m.ns = "visited_frontiers";
-    m.id = ctx_.marker_id++;
+    m.id = ctx_.marker_id;
     m.type = visualization_msgs::msg::Marker::SPHERE;
     m.action = visualization_msgs::msg::Marker::ADD;
     m.pose.position.x = _current_goal_x;
@@ -318,12 +367,27 @@ void Explorer::publishGoalMarker() {
     m.pose.position.z = 0.05;
     m.pose.orientation.w = 1.0;
     m.scale.x = m.scale.y = m.scale.z = 0.12;
-    m.color.r = 0.0f;
-    m.color.g = 1.0f;
-    m.color.b = 0.0f;
     m.color.a = 0.8f;
     m.lifetime = rclcpp::Duration::from_seconds(0);
     ma.markers.push_back(m);
+
+    visualization_msgs::msg::Marker t;
+    t.header = m.header;
+    t.ns = "goal_source";
+    t.id = ctx_.marker_id++; // same id as sphere, different ns
+    t.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+    t.action = visualization_msgs::msg::Marker::ADD;
+    t.pose.position.x = _current_goal_x;
+    t.pose.position.y = _current_goal_y;
+    t.pose.position.z = 0.25;
+    t.pose.orientation.w = 1.0;
+    t.scale.z = 0.1f;
+    t.color.r = t.color.g = t.color.b = 1.0f;
+    t.color.a = 1.0f;
+    t.text = (source == GoalSource::ADVISORY) ? "ADVISORY" : "LOCAL";
+    t.lifetime = rclcpp::Duration::from_seconds(0);
+    ma.markers.push_back(t);
+
     ctx_.goal_marker_pub->publish(ma);
 }
 
@@ -688,6 +752,7 @@ DecisionNode::DecisionNode() : Node("decision_node") {
     declare_parameter("radius_max", 8.0);
     declare_parameter("samples_per_cycle", 40);
     declare_parameter("corridor_bonus", 0.3);
+    declare_parameter("advisory_stale_secs", 3.0);
 
     declare_parameter("min_frontier_size", 3);
     declare_parameter("action_zone_heat_threshold", 60.0);
@@ -729,6 +794,18 @@ DecisionNode::DecisionNode() : Node("decision_node") {
             "/thermocator/action_zones",
             rclcpp::QoS(1).transient_local().reliable());
 
+    ctx_.advisory_sub =
+        create_subscription<geometry_msgs::msg::PoseStamped>(
+            "/advisory/goal",
+            rclcpp::QoS(1).reliable(),
+            [this](geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+                std::lock_guard<std::mutex> lock(*map_mutex_);
+                ctx_.advisory_goal.advisory_goal_x = msg->pose.position.x;
+                ctx_.advisory_goal.advisory_goal_y = msg->pose.position.y;
+                ctx_.advisory_goal.advisory_stamp = msg->header.stamp;
+                ctx_.advisory_goal.advisory_received = true;
+            });
+
     ctx_.send_goal_options.goal_response_callback =
         std::bind(&DecisionNode::goalResponseCallback, this,
                   std::placeholders::_1);
@@ -763,6 +840,7 @@ DecisionNode::DecisionNode() : Node("decision_node") {
     ep.radius_max = get_parameter("radius_max").as_double();
     ep.samples_per_cycle = get_parameter("samples_per_cycle").as_int();
     ep.corridor_bonus = get_parameter("corridor_bonus").as_double();
+    ep.advisory_stale_secs = get_parameter("advisory_stale_secs").as_double();
     explorer_ = std::make_unique<Explorer>(ctx_, ep);
 
     Actor::Params ap;

@@ -4,6 +4,7 @@
 #include <chrono>
 #include <memory>
 #include <mutex>
+#include <rclcpp/subscription.hpp>
 #include <rclcpp_action/client.hpp>
 #include <string>
 
@@ -15,6 +16,13 @@
 #include <visualization_msgs/msg/marker_array.hpp>
 
 namespace thermocator {
+
+struct AdvisoryGoal {
+    double advisory_goal_x = 0.0;
+    double advisory_goal_y = 0.0;
+    rclcpp::Time advisory_stamp = rclcpp::Time(0);
+    bool advisory_received = false;
+};
 
 struct NodeContext {
     rclcpp::Logger logger = rclcpp::get_logger("NodeContext");
@@ -28,6 +36,7 @@ struct NodeContext {
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr action_map_pub;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr goal_marker_pub;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr zone_marker_pub;
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr advisory_sub;
 
     std::shared_ptr<std::mutex> map_mutex;
     nav_msgs::msg::OccupancyGrid::SharedPtr thermal_map;
@@ -39,6 +48,8 @@ struct NodeContext {
     std::atomic<bool> goal_failed{false};
 
     std::chrono::steady_clock::time_point goal_sent_time;
+
+    AdvisoryGoal advisory_goal;
 
     std::string map_frame;
     std::string robot_frame;

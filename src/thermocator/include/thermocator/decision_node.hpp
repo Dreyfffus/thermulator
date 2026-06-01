@@ -49,6 +49,7 @@ class Explorer {
         double radius_max = 8.0;
         int samples_per_cycle = 40;
         double corridor_bonus = 0.3;
+        double advisory_stale_secs = 3.0;
     };
 
     explicit Explorer(NodeContext &ctx, const Params &p);
@@ -64,6 +65,11 @@ class Explorer {
 
     void handleScanning();
     void handleNavigating();
+
+    enum class GoalSource {
+        LOCAL,
+        ADVISORY
+    };
 
     double computeCoverageRatio(
         const nav_msgs::msg::OccupancyGrid &spatial,
@@ -88,12 +94,13 @@ class Explorer {
     void sendGoal(double x, double y);
     void checkTimeout();
     std::optional<std::pair<double, double>> getRobotPose() const;
-    void publishGoalMarker();
+    void publishGoalMarker(GoalSource source);
 
     State state_ = State::SCANNING;
     bool complete_ = false;
     double _current_goal_x = 0.0;
     double _current_goal_y = 0.0;
+    GoalSource _current_goal_source = GoalSource::LOCAL;
 
     mutable double sample_radius_;
     mutable std::mt19937 rng_;

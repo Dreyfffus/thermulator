@@ -21,6 +21,8 @@ domain_bridge:
       type: nav_msgs/msg/OccupancyGrid
       from_domain: 38
       to_domain: 1
+      wait_for_publisher: true
+      wait_for_subscription: true
       qos:
         reliability: reliable
         durability: transient_local
@@ -31,6 +33,8 @@ domain_bridge:
       type: nav_msgs/msg/OccupancyGrid
       from_domain: 38
       to_domain: 1
+      wait_for_publisher: true
+      wait_for_subscription: true
       qos:
         reliability: reliable
         durability: transient_local
@@ -41,30 +45,23 @@ domain_bridge:
       type: nav_msgs/msg/OccupancyGrid
       from_domain: 38
       to_domain: 1
+      wait_for_publisher: true
+      wait_for_subscription: true
       qos:
         reliability: reliable
         durability: transient_local
         history: keep_last
         depth: 1
 
-    - topic_name: /tf
-      type: tf2_msgs/msg/TFMessage
-      from_domain: 38
-      to_domain: 1
-      qos:
-        reliability: best_effort
-        history: keep_last
-        depth: 100
-
-    - topic_name: /tf_static
-      type: tf2_msgs/msg/TFMessage
+    - topic_name: /odom
+      type: nav_msgs/msg/Odometry
       from_domain: 38
       to_domain: 1
       qos:
         reliability: reliable
-        durability: transient_local
+        durability: volatile
         history: keep_last
-        depth: 1
+        depth: 10
 
     # ── Domain 1 → Domain 0 (advisory goal back to real robot) ───────────────
     # This is the ONLY channel from sim back to real.
@@ -74,6 +71,8 @@ domain_bridge:
       type: geometry_msgs/msg/PoseStamped
       from_domain: 1
       to_domain: 38
+      wait_for_publisher: true
+      wait_for_subscription: true
       qos:
         reliability: reliable
         history: keep_last
