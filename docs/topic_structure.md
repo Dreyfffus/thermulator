@@ -14,26 +14,26 @@
 - `/thermal_reading`: simulated thermal sensor reading from `thermal_broadcaster`.
 - `/thermal_map`: occupancy-grid style thermal map from `thermocator`.
 
-## Digital twin topics
+## Digital twin bridge topics
 
-- `/dt/odom`: mirror of `/odom`.
-- `/dt/scan`: mirror of `/scan`.
-- `/dt/map`: mirror of `/map`.
-- `/dt/thermal_map`: mirror of `/thermal_map`.
-- `/dt/thermal_reading`: mirror of `/thermal_reading`.
-- `/dt/cmd_vel`: digital-twin command input forwarded to `/cmd_vel`.
+- Domain 38 `/map` -> Domain 1 `/map`
+- Domain 38 `/thermal_map` -> Domain 1 `/thermal_map`
+- Domain 38 `/global_costmap/costmap` -> Domain 1 `/global_costmap/costmap`
+- Domain 38 `/odom` -> Domain 1 `/odom`
+- Domain 1 `/advisory/goal` -> Domain 38 `/advisory/goal`
 
-## Command flow
+## Advisory flow
 
-1. A test operator, demo script, or future DT controller publishes `geometry_msgs/msg/Twist` to `/dt/cmd_vel`.
-2. `dt_mediator` wraps the command in `geometry_msgs/msg/TwistStamped` and republishes it to `/cmd_vel`.
-3. The robot or Gazebo simulation consumes `/cmd_vel`.
+1. The physical robot stack publishes maps, costmap, thermal map, and odometry on Domain 38.
+2. `domain_bridge` republishes those selected topics into Domain 1.
+3. `advisory_node` consumes the bridged state and publishes `/advisory/goal` on Domain 1.
+4. `domain_bridge` republishes `/advisory/goal` back into Domain 38 for `decision_node`.
 
-## Sensor flow
+## Gazebo DT flow
 
-1. Gazebo or the robot publishes sensor/pose topics such as `/scan` and `/odom`.
-2. `dt_mediator` mirrors those topics to `/dt/scan` and `/dt/odom`.
-3. `sync_monitor` compares original and mirrored streams.
+1. `delta_thermulator.launch.py` starts Gazebo on Domain 1.
+2. `ros_gz_bridge` bridges Gazebo `/clock`, `/scan`, `/odom`, `/tf`, and `/tf_static` into ROS on Domain 1.
+3. `pose_sync_node` reads bridged `/odom` from Domain 38 and calls `/world/thermaria/set_pose` to keep the Gazebo model aligned.
 
 ## Map and thermal flow
 
@@ -41,4 +41,4 @@
 2. `thermocator` initializes from `/map`.
 3. `thermal_broadcaster` publishes `/thermal_reading`.
 4. `thermocator` publishes `/thermal_map`.
-5. `dt_mediator` mirrors `/map`, `/thermal_reading`, and `/thermal_map` into `/dt/*` topics.
+5. `domain_bridge` makes `/map` and `/thermal_map` available to Domain 1.

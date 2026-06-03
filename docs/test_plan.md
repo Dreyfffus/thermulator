@@ -8,13 +8,13 @@
 - Pass condition: build succeeds and `source install/setup.bash` exposes the packages.
 - Current status: partially implemented.
 
-## 2. Gazebo and RViz simulation
+## 2. Gazebo digital twin simulation
 
 - Objective: launch TurtleBot3 in the custom Gazebo world and optionally inspect in RViz.
-- Command: `ros2 launch my_tb3_world sim_with_bridge.launch.py use_sim_time:=true`
+- Command: `robot sim` or `ros2 launch my_tb3_world delta_thermulator.launch.py use_sim_time:=true`
 - Expected topics/nodes: Gazebo process, `ros_gz_parameter_bridge`, `/clock`.
 - Pass condition: Gazebo opens, robot spawns, `/clock` is visible in ROS.
-- Current status: implemented, untested.
+- Current status: implemented; ROS-Gazebo bridge is now launched by `delta_thermulator.launch.py`.
 
 ## 3. Simulated movement and sensors
 
@@ -24,13 +24,13 @@
 - Pass condition: scan and odometry messages are received while Gazebo is running.
 - Current status: partially implemented, untested.
 
-## 4. DT mediator / fan-in-fan-out
+## 4. Domain bridge
 
-- Objective: verify original project streams are mirrored into `/dt/*`.
-- Command: `ros2 launch thermocator dt_integration.launch.py use_sim_time:=true`
-- Expected topics/nodes: `dt_mediator`, `/dt/odom`, `/dt/scan`, `/dt/map`, `/dt/thermal_map`, `/dt/thermal_reading`.
-- Pass condition: `/dt/*` topics appear and receive messages when source topics are active.
-- Current status: implemented, untested.
+- Objective: verify physical-robot streams on Domain 38 are available to digital-twin nodes on Domain 1, and advisory goals return to Domain 38.
+- Command: `robot bridge` or `ros2 launch thermocator thermic_bridge.launch.py`
+- Expected topics/nodes: `domain_bridge`, `/map`, `/thermal_map`, `/global_costmap/costmap`, `/odom`, `/advisory/goal`.
+- Pass condition: with the bridge running, Domain 1 receives the robot map/state topics and Domain 38 receives `/advisory/goal` when the advisory node publishes.
+- Current status: implemented; physical-robot-side tests reportedly pass, DT communication needs runtime verification.
 
 ## 5. Bridged Gazebo stream
 
@@ -40,21 +40,21 @@
 - Pass condition: `/clock` publishes while Gazebo is running.
 - Current status: implemented, untested.
 
-## 6. Bidirectional communication
+## 6. Advisory communication
 
-- Objective: verify command flow from DT interface to robot/simulation command topic.
-- Command: `ros2 topic pub --once /dt/cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.05}, angular: {z: 0.0}}"`
-- Expected topics/nodes: `dt_mediator`, `/dt/cmd_vel`, `/cmd_vel`.
-- Pass condition: `/cmd_vel` receives the forwarded `geometry_msgs/msg/TwistStamped` command and the robot moves if the simulator accepts `/cmd_vel`.
+- Objective: verify the DT advisory path from Domain 1 back to the physical robot stack on Domain 38.
+- Command: with `robot bridge` running, publish or wait for `/advisory/goal` on Domain 1 and echo it on Domain 38.
+- Expected topics/nodes: `advisory_node`, `domain_bridge`, `/advisory/goal`.
+- Pass condition: `/advisory/goal` appears in Domain 38 and `decision_node` can consume it.
 - Current status: implemented, untested.
 
-## 7. Real-time synchronization and tolerance
+## 7. Digital twin pose synchronization
 
-- Objective: measure delay between original and `/dt/*` streams.
-- Command: `ros2 launch thermocator dt_integration.launch.py sync_tolerance_seconds:=0.5`
-- Expected topics/nodes: `sync_monitor`.
-- Pass condition: sync monitor prints `Sync ok` for active mirrored stream pairs, or warns when delay exceeds tolerance.
-- Current status: implemented, untested.
+- Objective: verify the Gazebo DT robot follows the physical robot pose.
+- Command: `robot dt` or `ros2 launch thermocator delta_thermal.launch.py`
+- Expected topics/nodes: `pose_sync_node`, `/odom`, `/world/thermaria/set_pose`.
+- Pass condition: `pose_sync_node` receives `/odom` on Domain 1 and successfully calls Gazebo's set-pose service.
+- Current status: implemented, likely blocked if `/odom` is not bridged or Gazebo set-pose service name differs.
 
 ## 8. Obstacle detection and avoidance
 
@@ -74,16 +74,16 @@
 
 ## 10. Scenario testing
 
-- Objective: run a repeatable scenario with Gazebo, bridge, Nav2, thermal mapping, mediator, and sync monitor.
+- Objective: run a repeatable scenario with Gazebo, ROS-Gazebo bridge, domain bridge, Nav2, thermal mapping, advisory, and pose sync.
 - Command: follow `docs/demo_checklist.md`.
-- Expected topics/nodes: Gazebo, bridge, Nav2, thermal nodes, DT mediator, sync monitor.
-- Pass condition: all required topics are active, `/dt/cmd_vel` forwards, thermal map publishes, and sync monitor reports health.
+- Expected topics/nodes: Gazebo, ROS-Gazebo bridge, `domain_bridge`, Nav2, thermal nodes, advisory node, pose sync node.
+- Pass condition: all required topics are active, `/advisory/goal` bridges back to Domain 38, thermal map publishes, and the Gazebo robot pose follows `/odom`.
 - Current status: implemented as checklist, untested.
 
 ## 11. Final demo preparation
 
 - Objective: provide a clear final demonstration sequence.
 - Command: follow `docs/demo_checklist.md`.
-- Expected topics/nodes: all demo nodes and `/dt/*` topics.
+- Expected topics/nodes: all demo nodes, bridge topics, `/advisory/goal`, and Gazebo set-pose service.
 - Pass condition: demonstration can be repeated from clean terminals.
 - Current status: implemented as documentation, untested.
