@@ -187,7 +187,7 @@ case "$service" in
                  ros2 run thermocator pose_sync_node"
         ;;
 
-    delta_thermal)
+    dt|delta_thermal)
         bash -c "${SIM_SETUP} && \
                  ros2 launch thermocator delta_thermal.launch.py"
         ;;
@@ -196,7 +196,7 @@ case "$service" in
     bridge)
         bash -c "source /opt/ros/jazzy/setup.bash && \
              source ${WS_ROOT}/install/setup.bash && \
-             ros2 launch thermocator dt_bridge.launch.py"
+             ros2 launch thermocator thermic_bridge.launch.py"
         ;;
 
 

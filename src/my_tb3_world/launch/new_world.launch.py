@@ -2,7 +2,8 @@
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import AppendEnvironmentVariable, IncludeLaunchDescription
+from launch.actions import AppendEnvironmentVariable, DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
@@ -15,6 +16,7 @@ def generate_launch_description():
     my_pkg_share = get_package_share_directory("my_tb3_world")
 
     use_sim_time = LaunchConfiguration("use_sim_time", default="true")
+    gui = LaunchConfiguration("gui", default="false")
     x_pose = LaunchConfiguration("x_pose", default="0.0")
     y_pose = LaunchConfiguration("y_pose", default="0.0")
 
@@ -41,8 +43,9 @@ def generate_launch_description():
         ),
         launch_arguments={
             "gz_args": "-g -v2",
-            "on_exit_shutdown": "true",
+            "on_exit_shutdown": "false",
         }.items(),
+        condition=IfCondition(gui),
     )
 
     robot_state_publisher_cmd = IncludeLaunchDescription(
@@ -60,6 +63,13 @@ def generate_launch_description():
     )
 
     ld = LaunchDescription()
+    ld.add_action(
+        DeclareLaunchArgument(
+            "gui",
+            default_value="false",
+            description="Start the Gazebo GUI client. Keep false for headless topic tests.",
+        )
+    )
     ld.add_action(set_env_vars_resources)
     ld.add_action(gzserver_cmd)
     ld.add_action(gzclient_cmd)

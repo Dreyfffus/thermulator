@@ -12,56 +12,44 @@ export TURTLEBOT3_MODEL=burger
 ## Terminal 2: launch Gazebo with bridge
 
 ```bash
-ros2 launch my_tb3_world sim_with_bridge.launch.py use_sim_time:=true
+robot sim
 ```
 
-## Terminal 3: launch Nav2
+## Terminal 3: launch physical robot stack
 
 ```bash
-ros2 launch turtlebot3_navigation2 navigation2.launch.py use_sim_time:=true params_file:=/ws/src/thermocator/config/nav2_thermal_params.yaml
+robot thermulator
 ```
 
-## Terminal 4: launch DT integration
+## Terminal 4: launch domain bridge
 
 ```bash
-ros2 launch thermocator dt_integration.launch.py use_sim_time:=true sync_tolerance_seconds:=0.5
+robot bridge
 ```
 
-## Terminal 5: inspect topics
+## Terminal 5: launch DT advisory and pose sync
 
 ```bash
-ros2 topic list | grep /dt
-ros2 topic echo /dt/odom --once
-ros2 topic echo /dt/scan --once
-ros2 topic echo /dt/thermal_reading --once
-ros2 topic echo /dt/thermal_map --once
+robot dt
 ```
 
-## Terminal 6: send a test DT command
+## Terminal 6: inspect bridge topics
 
 ```bash
-ros2 topic pub --once /dt/cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.05}, angular: {z: 0.0}}"
+ROS_DOMAIN_ID=1 ros2 topic echo /odom --once
+ROS_DOMAIN_ID=1 ros2 topic echo /map --once
+ROS_DOMAIN_ID=1 ros2 topic echo /thermal_map --once
+ROS_DOMAIN_ID=38 ros2 topic echo /advisory/goal --once
 ```
 
-Verify the command is forwarded:
+## Check Gazebo bridge topics
 
 ```bash
-ros2 topic echo /cmd_vel --once
+ROS_DOMAIN_ID=1 ros2 topic echo /clock --once
+ROS_DOMAIN_ID=1 ros2 topic echo /scan --once
 ```
 
-Expected result: `/cmd_vel` receives a `geometry_msgs/msg/TwistStamped` message and the robot moves forward in Gazebo.
-
-## Check sync monitor output
-
-The `dt_integration.launch.py` terminal should print lines like:
-
-```text
-Sync ok [odom]
-Sync ok [scan]
-Sync ok [thermal_map]
-```
-
-Warnings indicate the configured tolerance was exceeded.
+Expected result: `/clock`, `/scan`, and `/odom` are visible on Domain 1 while Gazebo, `ros_gz_bridge`, and `domain_bridge` are running.
 
 ## Check thermal mapping topics
 

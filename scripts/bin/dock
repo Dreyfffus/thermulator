@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+WS_ROOT=$(dirname "$(dirname "$SCRIPT_DIR")")
+
 attach="$1"
 service="${2:-}"
 package="${3:-}"
 
 ROBOT_DOMAIN_ID=38
 SIM_DOMAIN_ID=1
+DOCKER_TTY="-it"
+
+if [ ! -t 0 ]; then
+    DOCKER_TTY="-i"
+fi
 
 SETUP="source /opt/ros/jazzy/setup.bash && \
        source /opt/turtlebot3_ws/install/setup.bash && \
@@ -32,7 +40,7 @@ ensure_container() {
         docker run --rm -d --name turtlebot3_container --net=host \
             -e DISPLAY=$DISPLAY \
             -v /tmp/.X11-unix:/tmp/.X11-unix \
-            -v /home/c2irr10/turtlebot3_ws:/ws \
+            -v "${WS_ROOT}:/ws" \
             turtlebot3_ws bash -c \
             "${SETUP} && sleep infinity"
         sleep 1
@@ -78,7 +86,7 @@ case "$attach" in
         docker run --rm -it --name turtlebot3_container --net=host \
             -e DISPLAY=$DISPLAY \
             -v /tmp/.X11-unix:/tmp/.X11-unix \
-            -v /home/c2irr10/turtlebot3_ws:/ws \
+            -v "${WS_ROOT}:/ws" \
             turtlebot3_ws bash -c \
             "${SETUP} && exec bash"
         ;;
@@ -86,7 +94,7 @@ case "$attach" in
     attach)
         ensure_container
         echo "Attaching to session ..."
-        docker exec -it turtlebot3_container bash -c \
+        docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
             "${SETUP} && exec bash"
         ;;
 
@@ -96,32 +104,32 @@ case "$attach" in
         case "$service" in
 
             teleop)
-                docker exec -it turtlebot3_container bash -c \
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                     "${SETUP} && \
                      ros2 run turtlebot3_teleop teleop_keyboard"
                 ;;
 
             rviz)
-                docker exec -it turtlebot3_container bash -c \
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                     "${SETUP} && \
                      ros2 launch turtlebot3_cartographer cartographer.launch.py \
                      use_sim_time:=True"
                 ;;
 
             sim)
-                docker exec -it turtlebot3_container bash -c \
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                     "${SETUP} && \
                      ros2 launch my_tb3_world new_world.launch.py"
                 ;;
 
             dt)
-                docker exec -it turtlebot3_container bash -c \
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                     "${DT_SETUP} && \
                      ros2 launch my_tb3_world delta_thermulator.launch.py"
                 ;;
 
             nav)
-                docker exec -it turtlebot3_container bash -c \
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                     "${SETUP} && \
                      ros2 launch nav2_bringup navigation_launch.py \
                      use_sim_time:=True \
@@ -130,7 +138,7 @@ case "$attach" in
                 ;;
 
             lifecycle)
-                docker exec -it turtlebot3_container bash -c \
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                     "${SETUP} && \
                      ros2 run nav2_lifecycle_manager lifecycle_manager \
                      --ros-args \
@@ -140,35 +148,35 @@ case "$attach" in
                 ;;
 
             thermal)
-                docker exec -it turtlebot3_container bash -c \
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                     "${SETUP} && \
                      ros2 run thermocator thermocator \
                      --ros-args -p use_sim_time:=true"
                 ;;
 
             broadcaster)
-                docker exec -it turtlebot3_container bash -c \
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                     "${SETUP} && \
                      ros2 run thermocator thermal_broadcaster \
                      --ros-args -p use_sim_time:=true"
                 ;;
 
             decision)
-                docker exec -it turtlebot3_container bash -c \
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                     "${SETUP} && \
                      ros2 run thermocator decision_node \
                      --ros-args -p use_sim_time:=true"
                 ;;
 
             thermocator)
-                docker exec -it turtlebot3_container bash -c \
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                     "${SETUP} && \
                      ros2 launch thermocator thermocator.launch.py \
                      use_sim_time:=true"
                 ;;
 
             thermulator)
-                docker exec -it turtlebot3_container bash -c \
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                     "${SETUP} && \
                      ros2 launch thermocator thermulator.launch.py \
                      use_sim_time:=true"
@@ -177,14 +185,14 @@ case "$attach" in
             build)
                 if [ -n "$package" ]; then
                     echo "Building package: $package"
-                    docker exec -it turtlebot3_container bash -c \
+                    docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                         "${SETUP} && \
                          cd /ws && colcon build \
                          --packages-select ${package} --symlink-install \
                          --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
                 else
                     echo "Building all packages ..."
-                    docker exec -it turtlebot3_container bash -c \
+                    docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                         "${SETUP} && \
                          cd /ws && colcon build --symlink-install \
                          --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
@@ -193,25 +201,25 @@ case "$attach" in
 
 
             bridge)
-                docker exec -it turtlebot3_container bash -c \
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                     "${BRIDGE_SETUP} && \
                      ros2 launch thermocator thermic_bridge.launch.py"
                 ;;
 
             advisory)
-                docker exec -it turtlebot3_container bash -c \
-                    "${SETUP} && \
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
+                    "${DT_SETUP} && \
                      ros2 run thermocator advisory_node"
                 ;;
 
             pose_sync)
-                docker exec -it turtlebot3_container bash -c \
-                    "${SETUP} && \
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
+                    "${DT_SETUP} && \
                      ros2 run thermocator pose_sync_node"
                 ;;
 
             delta_thermal)
-                docker exec -it turtlebot3_container bash -c \
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                     "${BRIDGE_SETUP} && \
                      export ROS_DOMAIN_ID=${SIM_DOMAIN_ID}
                      ros2 launch thermocator delta_thermal.launch.py"
@@ -220,7 +228,7 @@ case "$attach" in
             build_dt)
                 if [ -n "$package" ]; then
                     echo "Building package (with DT nodes): $package"
-                    docker exec -it turtlebot3_container bash -c \
+                    docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                         "${SETUP} && \
                          cd /ws && colcon build \
                          --packages-select ${package} --symlink-install \
@@ -228,7 +236,7 @@ case "$attach" in
                                       -DBUILD_DT=ON"
                 else
                     echo "Building all packages (with DT nodes) ..."
-                    docker exec -it turtlebot3_container bash -c \
+                    docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                         "${SETUP} && \
                          cd /ws && colcon build --symlink-install \
                          --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \

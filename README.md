@@ -136,7 +136,7 @@ robot <service> [robot_ip] [domain_id] [package]
 | `sim`           | Gazebo sim on Domain 1 (`delta_thermulator.launch.py`) |
 | `advisory`      | Advisory node only |
 | `pose_sync`     | Pose sync node only |
-| `delta_thermal` | Full DT stack: advisory + pose_sync (`delta_thermal_launch.py`) |
+| `dt` / `delta_thermal` | Full DT stack: advisory + pose_sync (`delta_thermal.launch.py`) |
 
 #### Local services — bridge
 
@@ -172,8 +172,8 @@ dock <start | attach | remote> [service] [package]
 | Service | What it runs |
 |---|---|
 | `teleop` | Keyboard teleoperation |
-| `sim` | Gazebo simulation (`new_world.launch.py`) |
-| `dt` | Gazebo simulation (`delta_thermal.launch.py`) |
+| `sim` | Robot-side Gazebo simulation on Domain 38 (`new_world.launch.py`) |
+| `dt` | Digital twin Gazebo simulation on Domain 1 (`delta_thermulator.launch.py`) |
 | `rviz` | Cartographer SLAM + RViz2 |
 | `nav` | Nav2 |
 | `lifecycle` | Nav2 lifecycle manager |
@@ -181,13 +181,13 @@ dock <start | attach | remote> [service] [package]
 | `broadcaster` | Thermal sensor publisher |
 | `decision` | Decision node |
 | `launch` | Full thermocator pipeline |
-| `stack` | Entire stack: SLAM + Nav2 + thermocator |
+| `thermulator` | Entire stack: SLAM + Nav2 + thermocator |
 | `build [package]` | Standard build |
 | `build_dt [package]` | Build with `BUILD_DT=ON` |
 | `bridge` | `domain_bridge` (no domain ID — manages both internally) |
 | `advisory` | Advisory node only |
 | `pose_sync` | Pose sync node only |
-| `delta_thermal` | Full DT stack: bridge + advisory + pose_sync |
+| `delta_thermal` | DT advisory + pose_sync |
 
 ---
 
@@ -223,15 +223,26 @@ ros2 launch thermocator thermulator.launch.py use_sim_time:=false
 > [!IMPORTANT]
 > `use_sim_time:=false` for the real robot — there is no simulation clock on hardware.
 
-### dt_launch.py
+### delta_thermal.launch.py
 
 ```bash
-ros2 launch thermocator dt_launch.py
-ros2 launch thermocator dt_launch.py world_name:=my_world robot_entity_name:=turtlebot3_burger
+ros2 launch thermocator delta_thermal.launch.py
+ros2 launch thermocator delta_thermal.launch.py world_name:=thermaria robot_entity_name:=turtlebot3_burger
 ```
 
 > [!NOTE]
 > To find your world name: `ros2 service list | grep set_pose` — the name appears between `/world/` and `/set_pose`. It can also be found in the `<world name="...">` tag of your `.world` file.
+
+---
+
+## Test Documents
+
+| Document | Purpose |
+|---|---|
+| `docs/digital_twin_comm_test.md` | Chinese step-by-step digital twin communication test and troubleshooting guide |
+| `docs/digital_twin_comm_test_en.md` | English step-by-step digital twin communication test and troubleshooting guide |
+| `docs/demo_checklist.md` | Full demo launch checklist |
+| `docs/test_plan.md` | Broader project test plan |
 
 ---
 
@@ -258,7 +269,7 @@ Terminal 5: robot dt                    ← advisory + pose_sync on Domain 1
 
 ```
 Terminal 1: dock remote sim             ← wait for Gazebo up
-Terminal 2: dock remote stack
+Terminal 2: dock remote thermulator
 ```
 
 ### Home — simulating lab setup (two sims)
@@ -266,9 +277,9 @@ Terminal 2: dock remote stack
 Run the "robot" sim on Domain 38 and the digital twin on Domain 1:
 
 ```
-Terminal 1: ROS_DOMAIN_ID=38 ros2 launch my_tb3_world sim_home.launch.py
+Terminal 1: ROS_DOMAIN_ID=38 ros2 launch my_tb3_world new_world.launch.py
 Terminal 2: ROS_DOMAIN_ID=38 ros2 launch thermocator thermulator.launch.py use_sim_time:=true
-Terminal 3: dock remote sim             ← Domain 1
+Terminal 3: dock remote dt              ← Domain 1
 Terminal 4: dock remote bridge          ← no domain ID
 Terminal 5: dock remote dt              ← Domain 1
 ```
@@ -405,7 +416,7 @@ Domain 38 (robot/robot sim)          Domain 1 (Gazebo DT)
 /map              ──────────────────▶ /map
 /thermal_map      ──────────────────▶ /thermal_map
 /global_costmap   ──────────────────▶ /global_costmap
-/tf, /tf_static   ──────────────────▶ /tf, /tf_static
+/odom             ──────────────────▶ /odom
                   ◀────────────────── /advisory/goal
 ```
 

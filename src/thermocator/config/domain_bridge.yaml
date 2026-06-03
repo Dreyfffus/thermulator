@@ -9,71 +9,64 @@
 #  subscriptions in both domains simultaneously — something
 #  a regular rclcpp node cannot do.
 #
-#  Domain 0 = physical robot
+#  Domain 38 = physical robot/navigation stack
 #  Domain 1 = Gazebo digital twin
 # ============================================================
 
-domain_bridge:
-  topics:
-    # ── Domain 38 → Domain 1 (real sensor state into sim) ─────────────────────
+name: thermocator_domain_bridge
+topics:
+  # Domain 38 -> Domain 1: physical/navigation state into the digital twin.
+  map:
+    type: nav_msgs/msg/OccupancyGrid
+    from_domain: 38
+    to_domain: 1
+    wait_for_publisher: true
+    qos:
+      reliability: reliable
+      durability: transient_local
+      history: keep_last
+      depth: 1
 
-    - topic_name: /map
-      type: nav_msgs/msg/OccupancyGrid
-      from_domain: 38
-      to_domain: 1
-      wait_for_publisher: true
-      wait_for_subscription: true
-      qos:
-        reliability: reliable
-        durability: transient_local
-        history: keep_last
-        depth: 1
+  thermal_map:
+    type: nav_msgs/msg/OccupancyGrid
+    from_domain: 38
+    to_domain: 1
+    wait_for_publisher: true
+    qos:
+      reliability: reliable
+      durability: transient_local
+      history: keep_last
+      depth: 1
 
-    - topic_name: /thermal_map
-      type: nav_msgs/msg/OccupancyGrid
-      from_domain: 38
-      to_domain: 1
-      wait_for_publisher: true
-      wait_for_subscription: true
-      qos:
-        reliability: reliable
-        durability: transient_local
-        history: keep_last
-        depth: 1
+  global_costmap/costmap:
+    type: nav_msgs/msg/OccupancyGrid
+    from_domain: 38
+    to_domain: 1
+    wait_for_publisher: true
+    qos:
+      reliability: reliable
+      durability: transient_local
+      history: keep_last
+      depth: 1
 
-    - topic_name: /global_costmap/costmap
-      type: nav_msgs/msg/OccupancyGrid
-      from_domain: 38
-      to_domain: 1
-      wait_for_publisher: true
-      wait_for_subscription: true
-      qos:
-        reliability: reliable
-        durability: transient_local
-        history: keep_last
-        depth: 1
+  odom:
+    type: nav_msgs/msg/Odometry
+    from_domain: 38
+    to_domain: 1
+    wait_for_publisher: true
+    qos:
+      reliability: reliable
+      durability: volatile
+      history: keep_last
+      depth: 10
 
-    - topic_name: /odom
-      type: nav_msgs/msg/Odometry
-      from_domain: 38
-      to_domain: 1
-      qos:
-        reliability: reliable
-        durability: volatile
-        history: keep_last
-        depth: 10
-
-    # ── Domain 1 → Domain 0 (advisory goal back to real robot) ───────────────
-    # This is the ONLY channel from sim back to real.
-    # No cmd_vel. No odometry. No sensor data.
-
-    - topic_name: /advisory/goal
-      type: geometry_msgs/msg/PoseStamped
-      from_domain: 1
-      to_domain: 38
-      wait_for_publisher: true
-      wait_for_subscription: true
-      qos:
-        reliability: reliable
-        history: keep_last
-        depth: 1
+  # Domain 1 -> Domain 38: advisory only. No cmd_vel, odometry, or sensor data.
+  advisory/goal:
+    type: geometry_msgs/msg/PoseStamped
+    from_domain: 1
+    to_domain: 38
+    wait_for_publisher: true
+    qos:
+      reliability: reliable
+      history: keep_last
+      depth: 1

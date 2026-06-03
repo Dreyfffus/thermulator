@@ -13,16 +13,17 @@
 ## Added digital twin support
 
 - `src/my_tb3_world/config/ros_gz_bridge.yaml` defines explicit ROS/Gazebo bridge mappings for `/clock`, `/cmd_vel`, `/odom`, `/scan`, `/tf`, and `/tf_static`.
-- `src/my_tb3_world/launch/sim_with_bridge.launch.py` launches the existing custom world and starts `ros_gz_bridge`.
-- `dt_mediator` republishes project streams into `/dt/*` topics and forwards `/dt/cmd_vel` to `/cmd_vel`.
-- `sync_monitor` compares original topics with `/dt/*` mirror topics and reports header-time or arrival-time delay.
-- `src/thermocator/launch/dt_integration.launch.py` starts the thermal pipeline, decision node, DT mediator, and sync monitor together.
+- `src/my_tb3_world/launch/delta_thermulator.launch.py` launches the custom Gazebo world on Domain 1 and starts `ros_gz_bridge`.
+- `src/thermocator/config/domain_bridge.yaml` bridges selected robot-state topics from Domain 38 to Domain 1 and `/advisory/goal` back to Domain 38.
+- `src/thermocator/launch/thermic_bridge.launch.py` starts the `domain_bridge` process.
+- `src/thermocator/launch/delta_thermal.launch.py` starts the Domain 1 advisory and pose-sync nodes.
 
 ## Remaining untested items
 
 - The Nav2 thermal costmap plugin is registered and configured but still needs runtime verification.
 - The goal behavior from `decision_node` still needs scenario testing with Nav2 active.
 - Gazebo bridge topic names may need adjustment if the active TurtleBot3 Gazebo model publishes namespaced Gazebo topics.
+- The old `/dt/*` mediator workflow has been replaced by `domain_bridge`; stale references to `/dt/*` should be treated as obsolete.
 - `/dt/cmd_vel -> /cmd_vel` forwarding is implemented. The DT input uses `geometry_msgs/msg/Twist`; the mediator republishes `geometry_msgs/msg/TwistStamped` on `/cmd_vel` for Jazzy/TurtleBot3/Nav2 compatibility. Bidirectional motion must be verified with the running simulation.
 - End-to-end timing tolerance must be measured during a live demo run.
 
@@ -35,4 +36,4 @@
 
 ## Gazebo as the digital twin visualization
 
-Gazebo Sim is used as the digital twin visualization because it presents the robot, environment geometry, obstacles, sensor simulation, and simulated motion in one synchronized world. RViz remains useful for ROS introspection, maps, TF, Nav2 plans, and debugging, but Gazebo is the primary spatial visualization of the twin environment. The `/dt/*` topics provide a stable digital-twin-facing interface that mirrors robot, sensor, map, and thermal state without changing the teammate implementation.
+Gazebo Sim is used as the digital twin visualization because it presents the robot, environment geometry, obstacles, sensor simulation, and simulated motion in one synchronized world. RViz remains useful for ROS introspection, maps, TF, Nav2 plans, and debugging, but Gazebo is the primary spatial visualization of the twin environment. `domain_bridge` provides the selected cross-domain interface without changing the teammate implementation.
