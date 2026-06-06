@@ -63,6 +63,13 @@ colcon build --packages-select thermocator --symlink-install \
 
 ### Docker (home/WSL)
 
+To build the container:
+
+```bash
+# ../thermulator
+docker build -t turtlebot3_ws .
+```
+
 Start a container:
 
 ```bash
@@ -163,9 +170,14 @@ dock <start | attach | remote> [service] [package]
 
 | Command | What it does |
 |---|---|
+| `setup` | First build session |
 | `start` | Start a new interactive container session |
 | `attach` | Open a shell into the running container |
 | `remote <service>` | Run a service inside the container |
+
+>[!IMPORTANT] 
+> The `setup` command should be ran before anything else. It builds the sourced environment
+> necessary for all other `dock` commands.
 
 #### Remote services
 

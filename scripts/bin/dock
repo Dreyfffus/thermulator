@@ -31,6 +31,11 @@ BRIDGE_SETUP="source /opt/ros/jazzy/setup.bash && \
               source /ws/install/setup.bash && \
               export TURTLEBOT3_MODEL=burger"
 
+BARE_SETUP="source /opt/ros/jazzy/setup.bash && \
+            source /opt/turtlebot3_ws/install/setup.bash && \
+            export TURTLEBOT3_MODEL=burger && \
+            export ROS_DOMAIN_ID=${ROBOT_DOMAIN_ID}"
+
 RVIZ_CONFIG="/ws/src/thermocator/config/thermocator.rviz"
 BRIDGE_CONFIG="/ws/src/thermocator/config/domain_bridge.yaml"
 
@@ -54,6 +59,7 @@ if [ -z "$attach" ]; then
     echo "Usage: $0 <start | attach | remote> [service] [package]"
     echo ""
     echo "Commands:"
+    echo "  setup                -- first-time build (no workspace source required)"
     echo "  start                -- start a new interactive container session"
     echo "  attach               -- open a shell into the running container"
     echo "  remote <service>     -- run a service inside the container"
@@ -81,6 +87,33 @@ if [ -z "$attach" ]; then
 fi
 
 case "$attach" in
+  
+    setup)
+        if docker ps --format '{{.Names}}' | grep -q "^turtlebot3_container$"; then
+            echo "Container already running -- stopping it first ..."
+            docker rm -f turtlebot3_container
+        fi
+
+        echo "Starting fresh container for initial build ..."
+        docker run --rm -d --name turtlebot3_container --net=host \
+            -e DISPLAY=$DISPLAY \
+            -v /tmp/.X11-unix:/tmp/.X11-unix \
+            -v "${WS_ROOT}:/ws" \
+            turtlebot3_ws bash -c "sleep infinity"
+
+        echo "Waiting for container to be ready ..."
+        until docker inspect -f '{{.State.Running}}' turtlebot3_container 2>/dev/null | grep -q "true"; do
+            sleep 0.5
+        done
+        echo "Container ready."
+
+        echo "Building all packages (no workspace source) ..."
+        docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
+            "${BARE_SETUP} && \
+             cd /ws && colcon build --symlink-install \
+             --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+        ;;
+
     start)
         echo "Starting session ..."
         docker run --rm -it --name turtlebot3_container --net=host \

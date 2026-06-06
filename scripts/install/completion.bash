@@ -57,7 +57,7 @@ _dock_complete() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
     pprev="${COMP_WORDS[COMP_CWORD-2]}"
 
-    local commands="start attach remote"
+    local commands="setup start attach remote"
     local services="teleop rviz sim nav lifecycle thermal broadcaster decision \
                     thermocator thermulator build build_dt bridge advisory pose_sync delta_thermal dt"
 
