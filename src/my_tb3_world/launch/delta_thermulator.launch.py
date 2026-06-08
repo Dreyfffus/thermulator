@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
@@ -34,6 +35,20 @@ def generate_launch_description():
         os.path.join(get_package_share_directory("turtlebot3_gazebo"), "models"),
     )
 
+    bridge_config = os.path.join(my_pkg_share, "config", "ros_gz_bridge.yaml")
+
+    ros_gz_bridge = Node(
+        package="ros_gz_bridge",
+        executable="parameter_bridge",
+        name="ros_gz_bridge",
+        output="screen",
+        parameters=[
+            {
+                "config_file": bridge_config,
+                "use_sim_time": use_sim_time,
+            }
+        ],
+    )
     gzserver_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(ros_gz_sim_share, "launch", "gz_sim.launch.py")
@@ -80,6 +95,7 @@ def generate_launch_description():
     ld.add_action(set_domain)  # must be first
     ld.add_action(set_env_vars_resources)
     ld.add_action(gzserver_cmd)
+    ld.add_action(ros_gz_bridge)
     ld.add_action(gzclient_cmd)
     ld.add_action(spawn_turtlebot_cmd)
     ld.add_action(robot_state_publisher_cmd)
