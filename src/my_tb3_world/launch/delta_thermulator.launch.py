@@ -41,13 +41,9 @@ def generate_launch_description():
         package="ros_gz_bridge",
         executable="parameter_bridge",
         name="ros_gz_bridge",
+        arguments=["/world/thermaria/set_pose@ros_gz_interfaces/srv/SetEntityPose"],
+        parameters=[{"config_file": bridge_config, "use_sim_time": use_sim_time}],
         output="screen",
-        parameters=[
-            {
-                "config_file": bridge_config,
-                "use_sim_time": use_sim_time,
-            }
-        ],
     )
     gzserver_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -88,7 +84,7 @@ def generate_launch_description():
     ld.add_action(
         DeclareLaunchArgument(
             "gui",
-            default_value="false",
+            default_value="true",
             description="Start the Gazebo GUI client. Keep false for headless topic tests.",
         )
     )

@@ -19,7 +19,7 @@ class PoseSyncNode : public rclcpp::Node {
         RCLCPP_INFO(get_logger(), "Domain ID: %s",
                     std::getenv("ROS_DOMAIN_ID") ? std::getenv("ROS_DOMAIN_ID") : "not set");
         declare_parameter("world_name", std::string("my_world"));
-        declare_parameter("robot_entity_name", std::string("turtlebot3_burger"));
+        declare_parameter("robot_entity_name", std::string("burger"));
         declare_parameter("map_frame", std::string("map"));
         declare_parameter("robot_frame", std::string("base_footprint"));
         declare_parameter("sync_rate_hz", 1.0);
@@ -63,20 +63,7 @@ class PoseSyncNode : public rclcpp::Node {
 
   private:
     void syncPose() {
-
-        if (!service_ready_) {
-            if (!set_pose_client_->service_is_ready()) {
-                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 3000,
-                                     "PoseSyncNode: waiting for /world/%s/set_pose",
-                                     world_name_.c_str());
-                return;
-            }
-            RCLCPP_INFO(get_logger(),
-                        "PoseSyncNode: /world/%s/set_pose ready",
-                        world_name_.c_str());
-            service_ready_ = true;
-        }
-
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "syncPose called");
         if (!robot_pose_valid_)
             return;
 
@@ -96,25 +83,18 @@ class PoseSyncNode : public rclcpp::Node {
         if (dt < translation_deadband_ && dr < rotation_deadband_)
             return;
 
-        if (!set_pose_client_->wait_for_service(std::chrono::milliseconds(500))) {
-            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
-                                 "PoseSyncNode: /world/%s/set_pose not available",
-                                 world_name_.c_str());
-            return;
-        }
-
         auto req = std::make_shared<ros_gz_interfaces::srv::SetEntityPose::Request>();
         req->entity.name = robot_entity_name_;
         req->entity.type = ros_gz_interfaces::msg::Entity::MODEL;
-
         req->pose.position.x = tx;
         req->pose.position.y = ty;
         req->pose.position.z = robot_spawn_z_;
-
         req->pose.orientation.x = 0.0;
         req->pose.orientation.y = 0.0;
         req->pose.orientation.z = qz;
         req->pose.orientation.w = qw;
+
+        RCLCPP_INFO(get_logger(), "Sending set_pose to (%.3f, %.3f)", tx, ty);
 
         set_pose_client_->async_send_request(
             req,
@@ -122,10 +102,10 @@ class PoseSyncNode : public rclcpp::Node {
                 rclcpp::Client<ros_gz_interfaces::srv::SetEntityPose>::SharedFuture f) {
                 if (!f.get()->success)
                     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 3000,
-                                         "PoseSyncNode: set_pose rejected by Gazebo");
+                                         "PoseSyncNode: set_pose rejected");
                 else
-                    RCLCPP_DEBUG(get_logger(),
-                                 "PoseSyncNode: synced to (%.3f, %.3f)", tx, ty);
+                    RCLCPP_INFO(get_logger(),
+                                "PoseSyncNode: synced to (%.3f, %.3f)", tx, ty);
             });
 
         last_tx_ = tx;
@@ -133,7 +113,6 @@ class PoseSyncNode : public rclcpp::Node {
         last_qz_ = qz;
         last_qw_ = qw;
     }
-
     std::string world_name_;
     std::string robot_entity_name_;
     std::string map_frame_;

@@ -4,12 +4,6 @@
   gz_type_name: "gz.msgs.Clock"
   direction: GZ_TO_ROS
 
-- ros_topic_name: "/world/thermaria/set_pose"
-  gz_topic_name: "/world/thermaria/set_pose"
-  ros_type_name: "ros_gz_interfaces/srv/SetEntityPose"
-  gz_type_name: "gz.msgs.EntityPose"
-  direction: ROS_TO_GZ
-
 - ros_topic_name: "/cmd_vel"
   gz_topic_name: "/cmd_vel"
   ros_type_name: "geometry_msgs/msg/TwistStamped"
