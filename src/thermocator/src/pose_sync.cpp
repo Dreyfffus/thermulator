@@ -16,6 +16,8 @@ namespace thermocator {
 class PoseSyncNode : public rclcpp::Node {
   public:
     PoseSyncNode() : Node("pose_sync_node") {
+        RCLCPP_INFO(get_logger(), "Domain ID: %s",
+                    std::getenv("ROS_DOMAIN_ID") ? std::getenv("ROS_DOMAIN_ID") : "not set");
         declare_parameter("world_name", std::string("my_world"));
         declare_parameter("robot_entity_name", std::string("turtlebot3_burger"));
         declare_parameter("map_frame", std::string("map"));
