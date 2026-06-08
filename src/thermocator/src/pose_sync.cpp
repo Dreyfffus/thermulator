@@ -37,13 +37,6 @@ class PoseSyncNode : public rclcpp::Node {
         set_pose_client_ = create_client<ros_gz_interfaces::srv::SetEntityPose>(
             "/world/" + world_name_ + "/set_pose");
 
-        RCLCPP_INFO(get_logger(), "Waiting for /world/%s/set_pose...", world_name_.c_str());
-        while (!set_pose_client_->wait_for_service(std::chrono::seconds(1))) {
-            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 3000,
-                                 "PoseSyncNode: waiting for set_pose service...");
-        }
-        RCLCPP_INFO(get_logger(), "PoseSyncNode: set_pose service ready");
-
         odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
             "/odom", rclcpp::QoS(10),
             [this](nav_msgs::msg::Odometry::SharedPtr msg) {
@@ -68,6 +61,20 @@ class PoseSyncNode : public rclcpp::Node {
 
   private:
     void syncPose() {
+
+        if (!service_ready_) {
+            if (!set_pose_client_->service_is_ready()) {
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 3000,
+                                     "PoseSyncNode: waiting for /world/%s/set_pose",
+                                     world_name_.c_str());
+                return;
+            }
+            RCLCPP_INFO(get_logger(),
+                        "PoseSyncNode: /world/%s/set_pose ready",
+                        world_name_.c_str());
+            service_ready_ = true;
+        }
+
         if (!robot_pose_valid_)
             return;
 
@@ -144,6 +151,8 @@ class PoseSyncNode : public rclcpp::Node {
     double last_ty_ = 1e9;
     double last_qz_ = 0.0;
     double last_qw_ = 1.0;
+
+    bool service_ready_ = false;
 
     rclcpp::Client<ros_gz_interfaces::srv::SetEntityPose>::SharedPtr set_pose_client_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
