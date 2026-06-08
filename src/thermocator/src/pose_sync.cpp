@@ -63,7 +63,6 @@ class PoseSyncNode : public rclcpp::Node {
 
   private:
     void syncPose() {
-        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "syncPose called");
         if (!robot_pose_valid_)
             return;
 
@@ -94,25 +93,26 @@ class PoseSyncNode : public rclcpp::Node {
         req->pose.orientation.z = qz;
         req->pose.orientation.w = qw;
 
-        RCLCPP_INFO(get_logger(), "Sending set_pose to (%.3f, %.3f)", tx, ty);
-
         set_pose_client_->async_send_request(
             req,
-            [this, tx, ty](
+            [this, tx, ty, qz, qw](
                 rclcpp::Client<ros_gz_interfaces::srv::SetEntityPose>::SharedFuture f) {
                 if (!f.get()->success)
                     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 3000,
-                                         "PoseSyncNode: set_pose rejected");
-                else
+                                         "PoseSyncNode: set_pose rejected by Gazebo"
+                                         "(entity not ready yet?)");
+                else {
+                    last_tx_ = tx;
+                    last_ty_ = ty;
+                    last_qz_ = qz;
+                    last_qw_ = qw;
+
                     RCLCPP_INFO(get_logger(),
                                 "PoseSyncNode: synced to (%.3f, %.3f)", tx, ty);
+                }
             });
-
-        last_tx_ = tx;
-        last_ty_ = ty;
-        last_qz_ = qz;
-        last_qw_ = qw;
     }
+
     std::string world_name_;
     std::string robot_entity_name_;
     std::string map_frame_;

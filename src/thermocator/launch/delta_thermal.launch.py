@@ -15,7 +15,7 @@ def generate_launch_description():
     )
     robot_entity_arg = DeclareLaunchArgument(
         "robot_entity_name",
-        default_value="turtlebot3_burger",
+        default_value="burger",
         description="Gazebo model name of the sim robot",
     )
 
