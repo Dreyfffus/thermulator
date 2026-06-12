@@ -73,13 +73,30 @@ def generate_launch_description():
         launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
 
-    spawn_turtlebot_cmd = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(launch_file_dir, "spawn_turtlebot3.launch.py")
-        ),
-        launch_arguments={"x_pose": x_pose, "y_pose": y_pose}.items(),
+    spawn_turtlebot_cmd = Node(
+        package="ros_gz_sim",
+        executable="create",
+        output="screen",
+        arguments=[
+            "-world",
+            "thermaria",
+            "-name",
+            "burger",
+            "-file",
+            os.path.join(
+                get_package_share_directory("turtlebot3_gazebo"),
+                "models",
+                "turtlebot3_burger",
+                "model.sdf",
+            ),
+            "-x",
+            x_pose,
+            "-y",
+            y_pose,
+            "-z",
+            "0.01",
+        ],
     )
-
     ld = LaunchDescription()
     ld.add_action(
         DeclareLaunchArgument(
