@@ -1,0 +1,10 @@
+CompileFlags:
+  CompilationDatabase: /home/personal/thermulator/build/thermocator
+  Add:
+    - -I/opt/ros/jazzy/include
+    - -I/home/personal/thermulator/src/thermocator/include
+    - -I/home/personal/thermulator/install/thermocator/include
+
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None

@@ -63,6 +63,8 @@ install/
 build/
 log/
 
+src/.clangd
+
 !scripts/bin/
 !scripts/install/
 
