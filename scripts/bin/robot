@@ -32,7 +32,7 @@ if [ -z "$service" ]; then
     echo "  On robot via SSH (turtlebot3@robot_ip):"
     echo "  bringup      -- TurtleBot3 bringup (requires robot_ip)"
     echo ""
-    echo "  Local — robot stack (Domain domain_id, default 38):"
+    echo "  Local ΓÇö robot stack (Domain domain_id, default 38):"
     echo "  teleop       -- keyboard teleoperation"
     echo "  rviz         -- Cartographer SLAM + RViz2 with thermocator config"
     echo "  nav          -- Nav2 navigation stack"
@@ -41,21 +41,20 @@ if [ -z "$service" ]; then
     echo "  broadcaster  -- ThermalBroadcaster (simulated sensor)"
     echo "  decision     -- DecisionNode (exploration + actioning)"
     echo "  thermocator  -- Full thermocator pipeline (broadcaster + thermal + decision)"
-    echo "  thermulator  -- Entire stack (Cartographer + Nav2 + thermocator + RViz2)"
+    echo "  thermulator  -- LOCAL stack: Cartographer + Nav2 + thermocator + arbiter"
+    echo "  arbiter      -- GoalArbiter only (selects best LOCAL/TWINNED goal)"
     echo "  map_save     -- Save current map to config folder"
     echo ""
-    echo "  Local — digital twin (Domain 1):"
-    echo "  sim          -- Gazebo simulation world"
-    echo "  advisory     -- AdvisoryNode only"
-    echo "  pose_sync    -- PoseSyncNode only"
-    echo "  delta_thermal-- Full DT stack (sim + advisory + pose_sync)"
+    echo "  Local ΓÇö digital twin (Domain 1):"
+    echo "  sim          -- Twin Gazebo simulation world"
+    echo "  twin         -- TWINNED stack: full thermocator (publishes goals) + battery monitor"
+    echo "  battery      -- BatteryMonitor only (logs bridged battery every 10s)"
     echo ""
-    echo "  Local — bridge (no domain):"
+    echo "  Local ΓÇö bridge (no domain):"
     echo "  bridge       -- domain_bridge (Domain ${domain_id} <-> Domain 1)"
     echo ""
     echo "  Build:"
     echo "  build        -- Build all packages (optional: [package])"
-    echo "  build_dt     -- Build with digital twin nodes (BUILD_DT=ON)"
     echo ""
     echo "  Paths:"
     echo "  Workspace : ${WS_ROOT}"
@@ -65,22 +64,12 @@ if [ -z "$service" ]; then
     echo "  robot_ip  : required only for 'bringup'"
     echo "  domain_id : defaults to 38"
     echo ""
-    echo "  Recommended launch order:"
-    echo "    1. bringup <robot_ip>   -- SSH to robot"
-    echo "    2. rviz                 -- SLAM + RViz2, wait for /map"
-    echo "    3. nav                  -- Nav2"
-    echo "    4. lifecycle            -- activate Nav2 nodes"
-    echo "    5. thermocator          -- thermal pipeline"
-    echo "    6. sim                  -- Gazebo (new terminal)"
-    echo "    7. bridge               -- domain_bridge (new terminal)"
-    echo "    8. delta_thermal        -- advisory + pose_sync (new terminal)"
-    echo ""
-    echo "    Or condensed (stable stack):"
-    echo "    1. bringup <robot_ip>"
-    echo "    2. thermulator"
-    echo "    3. sim"
-    echo "    4. bridge"
-    echo "    5. delta_thermal"
+    echo "  Recommended launch order (robot + digital twin):"
+    echo "    1. bringup <robot_ip>   -- SSH to robot, wait for sensors"
+    echo "    2. thermulator          -- LOCAL stack + arbiter (Domain 38)"
+    echo "    3. sim                  -- twin Gazebo (Domain 1, new terminal)"
+    echo "    4. bridge               -- domain_bridge (new terminal)"
+    echo "    5. twin                 -- TWINNED stack + battery (Domain 1, new terminal)"
     exit 1
 fi
 
@@ -161,7 +150,12 @@ case "$service" in
     thermulator)
         bash -c "${SETUP} && \
                  ros2 launch thermocator thermulator.launch.py \
-                 use_sim_time:=false"
+                 use_sim_time:=false goal_source:=LOCAL run_arbiter:=true"
+        ;;
+
+    arbiter)
+        bash -c "${SETUP} && \
+                 ros2 run thermocator goal_arbiter"
         ;;
 
     map_save)
@@ -177,19 +171,16 @@ case "$service" in
                  use_sim_time:=true"
         ;;
 
-    advisory)
+    twin)
         bash -c "${SIM_SETUP} && \
-                 ros2 run thermocator advisory_node"
+                 ros2 launch thermocator thermulator.launch.py \
+                 use_sim_time:=true goal_source:=TWINNED \
+                 run_arbiter:=false run_battery_monitor:=true"
         ;;
 
-    pose_sync)
+    battery)
         bash -c "${SIM_SETUP} && \
-                 ros2 run thermocator pose_sync_node"
-        ;;
-
-    dt|delta_thermal)
-        bash -c "${SIM_SETUP} && \
-                 ros2 launch thermocator delta_thermal.launch.py"
+                 ros2 run thermocator battery_monitor"
         ;;
 
 
@@ -216,27 +207,10 @@ case "$service" in
         fi
         ;;
 
-    build_dt)
-        if [ -n "$package" ]; then
-            echo "Building package (with DT nodes): $package"
-            bash -c "${SETUP} && \
-                     cd ${WS_ROOT} && \
-                     colcon build --packages-select ${package} --symlink-install \
-                     --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-                                  -DBUILD_DT=ON"
-        else
-            echo "Building all packages (with DT nodes) ..."
-            bash -c "${SETUP} && \
-                     cd ${WS_ROOT} && \
-                     colcon build --symlink-install \
-                     --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-                                  -DBUILD_DT=ON"
-        fi
-        ;;
-
     *)
         echo "Error: unknown service '$service'"
         echo "Run $0 without arguments to see usage"
         exit 1
         ;;
 esac
+

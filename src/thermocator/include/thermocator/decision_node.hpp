@@ -7,10 +7,8 @@
 #include <random>
 #include <vector>
 
-#include <nav2_msgs/action/navigate_to_pose.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <rclcpp/rclcpp.hpp>
-#include <rclcpp_action/rclcpp_action.hpp>
 #include <tf2/exceptions.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
@@ -49,7 +47,6 @@ class Explorer {
         double radius_max = 8.0;
         int samples_per_cycle = 40;
         double corridor_bonus = 0.3;
-        double advisory_stale_secs = 3.0;
     };
 
     explicit Explorer(NodeContext &ctx, const Params &p);
@@ -65,11 +62,6 @@ class Explorer {
 
     void handleScanning();
     void handleNavigating();
-
-    enum class GoalSource {
-        LOCAL,
-        ADVISORY
-    };
 
     double computeCoverageRatio(
         const nav_msgs::msg::OccupancyGrid &spatial,
@@ -91,16 +83,15 @@ class Explorer {
         const nav_msgs::msg::OccupancyGrid &thermal,
         double rx, double ry, double gx, double gy) const;
 
-    void sendGoal(double x, double y);
-    void checkTimeout();
+    // Records a scored goal candidate (published to the arbiter by the control
+    // loop heartbeat) and starts the local arrival/timeout tracking.
+    void setGoal(double x, double y, double score);
     std::optional<std::pair<double, double>> getRobotPose() const;
-    void publishGoalMarker(GoalSource source);
 
     State state_ = State::SCANNING;
     bool complete_ = false;
     double _current_goal_x = 0.0;
     double _current_goal_y = 0.0;
-    GoalSource _current_goal_source = GoalSource::LOCAL;
 
     mutable double sample_radius_;
     mutable std::mt19937 rng_;
@@ -148,7 +139,7 @@ class Actor {
 
     void publishZoneMarker(const ActionZone &zone, int id);
     void publishActionMap(const ActionZone &zone);
-    void sendGoal(double x, double y);
+    void setGoal(double x, double y, double score);
     std::optional<std::pair<double, double>> getRobotPose() const;
 
     State state_ = State::PLANNING;
@@ -177,27 +168,16 @@ class DecisionNode : public rclcpp::Node {
     void costmapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
     void controlLoop();
 
-    void goalResponseCallback(
-        const rclcpp_action::ClientGoalHandle<
-            nav2_msgs::action::NavigateToPose>::SharedPtr &handle);
-    void feedbackCallback(
-        rclcpp_action::ClientGoalHandle<
-            nav2_msgs::action::NavigateToPose>::SharedPtr,
-        const std::shared_ptr<
-            const nav2_msgs::action::NavigateToPose::Feedback>
-            fb);
-    void resultCallback(
-        const rclcpp_action::ClientGoalHandle<
-            nav2_msgs::action::NavigateToPose>::WrappedResult &result);
+    // Synthesizes goal success/failure from robot-pose proximity and timeout,
+    // replacing the Nav2 action feedback the node used to rely on.
+    void updateGoalStatus();
+    // Re-publishes the active candidate so the arbiter keeps a fresh view.
+    void publishCurrentCandidate();
 
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr thermal_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr spatial_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr costmap_sub_;
     rclcpp::TimerBase::SharedPtr control_timer_;
-
-    rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SharedPtr nav_client_;
-    rclcpp_action::ClientGoalHandle<
-        nav2_msgs::action::NavigateToPose>::SharedPtr current_goal_handle_;
 
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -207,6 +187,8 @@ class DecisionNode : public rclcpp::Node {
 
     std::unique_ptr<Explorer> explorer_;
     std::unique_ptr<Actor> actor_;
+
+    double goal_timeout_seconds_ = 70.0;
 
     enum class Phase {
         WAITING,

@@ -5,8 +5,6 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-option(BUILD_DT "Build digital twin nodes (requires ros_gz_interfaces)" OFF)
-
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(tf2 REQUIRED)
@@ -26,10 +24,7 @@ find_package(nav2_costmap_2d REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
-
-if(BUILD_DT)
-  find_package(ros_gz_interfaces REQUIRED)
-endif()
+find_package(thermocator_msgs REQUIRED)
 
 set(THERMOCATOR_DEPS
   rclcpp
@@ -44,6 +39,7 @@ set(THERMOCATOR_DEPS
   builtin_interfaces
   geometry_msgs
   visualization_msgs
+  thermocator_msgs
 )
 
 add_executable(decision_node
@@ -56,6 +52,28 @@ target_include_directories(decision_node PUBLIC
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
 )
 target_compile_features(decision_node PUBLIC cxx_std_17)
+
+# Selects the best scored goal candidate (LOCAL vs TWINNED) and drives Nav2.
+add_executable(goal_arbiter
+  src/goal_arbiter.cpp
+)
+ament_target_dependencies(goal_arbiter ${THERMOCATOR_DEPS})
+target_include_directories(goal_arbiter PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
+)
+target_compile_features(goal_arbiter PUBLIC cxx_std_17)
+
+# Logs the bridged battery state on the digital twin every 10 seconds.
+add_executable(battery_monitor
+  src/battery_monitor.cpp
+)
+ament_target_dependencies(battery_monitor ${THERMOCATOR_DEPS})
+target_include_directories(battery_monitor PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
+)
+target_compile_features(battery_monitor PUBLIC cxx_std_17)
 
 add_executable(thermocator
   src/thermocator.cpp
@@ -108,46 +126,14 @@ target_compile_options(thermocator_display PRIVATE
 set_property(TARGET thermocator_display PROPERTY AUTOMOC ON)
 pluginlib_export_plugin_description_file(rviz_common plugin_description.xml)
 
-if(BUILD_DT)
-  set(DT_DEPS
-    ${THERMOCATOR_DEPS}
-    ros_gz_interfaces
-  )
-
-  add_executable(pose_sync_node
-    src/pose_sync.cpp
-  )
-  ament_target_dependencies(pose_sync_node ${DT_DEPS})
-  target_include_directories(pose_sync_node PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
-  )
-  target_compile_features(pose_sync_node PUBLIC cxx_std_17)
-
-  add_executable(advisory_node
-    src/advisory_node.cpp
-  )
-  ament_target_dependencies(advisory_node ${THERMOCATOR_DEPS})
-  target_include_directories(advisory_node PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
-  )
-  target_compile_features(advisory_node PUBLIC cxx_std_17)
-endif()
-
 set(INSTALL_TARGETS
   thermocator
   thermocator_display
   thermal_broadcaster
   decision_node
+  goal_arbiter
+  battery_monitor
 )
-
-if(BUILD_DT)
-  list(APPEND INSTALL_TARGETS
-    pose_sync_node
-    advisory_node
-  )
-endif()
 
 install(TARGETS ${INSTALL_TARGETS}
   ARCHIVE DESTINATION lib
@@ -188,3 +174,4 @@ if(BUILD_TESTING)
 endif()
 
 ament_package()
+

@@ -6,8 +6,8 @@ _robot_complete() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     local services="bringup teleop rviz nav lifecycle thermal broadcaster decision \
-                    thermocator thermulator map_save sim advisory pose_sync delta_thermal \
-                    bridge build build_dt"
+                    thermocator thermulator arbiter map_save sim twin battery \
+                    bridge build"
 
     case "$COMP_CWORD" in
         1)
@@ -17,8 +17,8 @@ _robot_complete() {
             case "${COMP_WORDS[1]}" in
                 bringup)
                     ;;
-                build|build_dt)
-                    COMPREPLY=($(compgen -W "thermocator my_tb3_world" -- "$cur"))
+                build)
+                    COMPREPLY=($(compgen -W "thermocator_msgs thermocator my_tb3_world" -- "$cur"))
                     ;;
                 *)
                     ;;
@@ -29,7 +29,7 @@ _robot_complete() {
                 bringup)
                     COMPREPLY=($(compgen -W "38 0 1" -- "$cur"))
                     ;;
-                build|build_dt)
+                build)
                     ;;
                 *)
                     COMPREPLY=($(compgen -W "38 0 1" -- "$cur"))
@@ -38,7 +38,7 @@ _robot_complete() {
             ;;
         4)
             case "${COMP_WORDS[1]}" in
-                build|build_dt)
+                build)
                     # no-op
                     ;;
                 *)
@@ -59,7 +59,7 @@ _dock_complete() {
 
     local commands="setup start attach remote"
     local services="teleop rviz sim nav lifecycle thermal broadcaster decision \
-                    thermocator thermulator build build_dt bridge advisory pose_sync delta_thermal dt"
+                    thermocator thermulator arbiter build bridge twin battery dt"
 
     case "$COMP_CWORD" in
         1)
@@ -73,8 +73,8 @@ _dock_complete() {
         3)
             if [[ "$pprev" == "remote" ]]; then
                 case "$prev" in
-                    build|build_dt)
-                        COMPREPLY=($(compgen -W "thermocator my_tb3_world" -- "$cur"))
+                    build)
+                        COMPREPLY=($(compgen -W "thermocator_msgs thermocator my_tb3_world" -- "$cur"))
                         ;;
                 esac
             fi
@@ -82,3 +82,4 @@ _dock_complete() {
     esac
 }
 complete -F _dock_complete dock
+

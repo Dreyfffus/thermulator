@@ -27,8 +27,10 @@ Two ROS2 domain IDs are in use:
 
 | Domain | Purpose |
 |---|---|
-| `38` | Physical robot stack (or robot sim in home setup) |
-| `1` | Digital twin Gazebo sim + advisory nodes |
+| `38` | Physical robot stack (or robot sim in home setup) + **goal arbiter** |
+| `1` | Digital twin: a **full, independent thermocator stack** + Gazebo sim |
+
+Both domains run the *same* thermocator stack (SLAM, Nav2, thermal map builder, decision node). Each decision node publishes scored goal candidates to `/thermocator/goals`; the **goal arbiter** (Domain 38) selects the best one, sends it to Nav2, and labels it `LOCAL` or `TWINNED` in RViz. The twin robot is no longer teleported — it moves along with the real robot's navigation commands via bridged `/cmd_vel`.
 
 The `domain_bridge` node connects the two domains. It must be launched without `ROS_DOMAIN_ID` set — it manages both domains internally.
 
@@ -50,13 +52,16 @@ export ROS_DOMAIN_ID=38
 Build:
 
 ```bash
-# Standard build
-colcon build --packages-select thermocator --symlink-install
-
-# With digital twin nodes (requires ros_gz_interfaces)
-colcon build --packages-select thermocator --symlink-install \
-  --cmake-args -DBUILD_DT=ON
+# Build the message package first (or just build everything), then thermocator
+colcon build --packages-select thermocator_msgs thermocator --symlink-install
 ```
+
+> [!NOTE]
+> `thermocator` depends on the `thermocator_msgs` interface package (it defines
+> `GoalCandidate`, the message on `/thermocator/goals`). Build `thermocator_msgs`
+> first, or build the whole workspace so colcon orders it for you. There is no
+> longer a `BUILD_DT` flag — the digital-twin nodes were removed and the twin now
+> runs the standard stack.
 
 > [!TIP]
 > `--symlink-install` means changes to yaml and config files take effect immediately without rebuilding.
@@ -80,23 +85,15 @@ Inside the container:
 
 ```bash
 cd /ws
-colcon build --packages-select thermocator my_tb3_world --symlink-install
+colcon build --packages-select thermocator_msgs thermocator my_tb3_world --symlink-install
 source install/setup.bash
-```
-
-With digital twin nodes:
-
-```bash
-colcon build --packages-select thermocator my_tb3_world --symlink-install \
-  --cmake-args -DBUILD_DT=ON
 ```
 
 Or use the script from the host:
 
 ```bash
-dock remote build               # all packages
-dock remote build thermocator   # selective
-dock remote build_dt            # with DT nodes
+dock remote build               # all packages (recommended — orders deps for you)
+dock remote build thermocator   # selective (build thermocator_msgs first)
 ```
 
 ---
@@ -133,17 +130,17 @@ robot <service> [robot_ip] [domain_id] [package]
 | `broadcaster` | Thermal sensor publisher |
 | `decision` | Decision node |
 | `thermocator` | Full thermocator pipeline (staggered) |
-| `thermulator` | Entire stack: SLAM + Nav2 + thermocator (staggered) |
+| `thermulator` | LOCAL stack: SLAM + Nav2 + thermocator + arbiter (staggered) |
+| `arbiter` | Goal arbiter only |
 | `map_save` | Save current map to config folder |
 
 #### Local services — digital twin (Domain 1)
 
 | Service | What it runs |
 |-----------------|-------------|
-| `sim`           | Gazebo sim on Domain 1 (`delta_thermulator.launch.py`) |
-| `advisory`      | Advisory node only |
-| `pose_sync`     | Pose sync node only |
-| `dt` / `delta_thermal` | Full DT stack: advisory + pose_sync (`delta_thermal.launch.py`) |
+| `sim`           | Twin Gazebo sim on Domain 1 (`delta_thermulator.launch.py`) |
+| `twin`          | TWINNED stack: full thermocator (publishes goals) + battery monitor |
+| `battery`       | Battery monitor only (logs bridged battery every 10 s) |
 
 #### Local services — bridge
 
@@ -156,7 +153,6 @@ robot <service> [robot_ip] [domain_id] [package]
 | Service | What it runs |
 |---|---|
 | `build [package]` | Standard build |
-| `build_dt [package]` | Build with `BUILD_DT=ON` |
 
 ---
 
@@ -192,14 +188,14 @@ dock <start | attach | remote> [service] [package]
 | `thermal` | Thermal map builder |
 | `broadcaster` | Thermal sensor publisher |
 | `decision` | Decision node |
-| `launch` | Full thermocator pipeline |
-| `thermulator` | Entire stack: SLAM + Nav2 + thermocator |
+| `thermocator` | Full thermocator pipeline |
+| `thermulator` | LOCAL stack: SLAM + Nav2 + thermocator + arbiter |
+| `arbiter` | Goal arbiter only |
 | `build [package]` | Standard build |
-| `build_dt [package]` | Build with `BUILD_DT=ON` |
 | `bridge` | `domain_bridge` (no domain ID — manages both internally) |
-| `advisory` | Advisory node only |
-| `pose_sync` | Pose sync node only |
-| `delta_thermal` | DT advisory + pose_sync |
+| `dt` | Twin Gazebo sim (Domain 1, `delta_thermulator.launch.py`) |
+| `twin` | TWINNED stack: full thermocator + battery monitor (Domain 1) |
+| `battery` | Battery monitor only (Domain 1) |
 
 ---
 
@@ -207,11 +203,19 @@ dock <start | attach | remote> [service] [package]
 
 | File | Package | Purpose |
 |---|---|---|
-| `thermocator.launch.py` | `thermocator` | Broadcaster + thermal map builder + decision node |
-| `thermulator.launch.py` | `thermocator` | Full stack: Cartographer + Nav2 + lifecycle + thermocator (staggered) |
-| `delta_thermal.launch.py` | `thermocator` | Digital twin: domain_bridge + advisory + pose_sync |
-| `new_world.launch.py` | `my_tb3_world` | Gazebo sim for home/Docker setup |
-| `delta_thermulator.launch.py` | `my_tb3_world` | Gazebo sim for lab digital twin (sets Domain 1 internally) |
+| `thermocator.launch.py` | `thermocator` | Broadcaster + thermal map builder + decision node (`goal_source` arg) |
+| `thermulator.launch.py` | `thermocator` | Full stack: Cartographer + Nav2 + lifecycle + thermocator, with optional `goal_arbiter` / `battery_monitor` (staggered) |
+| `thermic_bridge.launch.py` | `thermocator` | `domain_bridge` process |
+| `new_world.launch.py` | `my_tb3_world` | Robot-side Gazebo sim (home/Docker), isolated gz partition |
+| `delta_thermulator.launch.py` | `my_tb3_world` | Twin Gazebo sim (Domain 1, isolated gz partition) |
+
+`thermulator.launch.py` arguments:
+
+| Arg | Default | Meaning |
+|---|---|---|
+| `goal_source` | `LOCAL` | Tag for this stack's goal candidates (`LOCAL` on D38, `TWINNED` on D1) |
+| `run_arbiter` | `true` | Run the `goal_arbiter` (Domain 38 only) |
+| `run_battery_monitor` | `false` | Run the `battery_monitor` (twin / Domain 1 only) |
 
 ### thermulator.launch.py
 
@@ -235,15 +239,15 @@ ros2 launch thermocator thermulator.launch.py use_sim_time:=false
 > [!IMPORTANT]
 > `use_sim_time:=false` for the real robot — there is no simulation clock on hardware.
 
-### delta_thermal.launch.py
+### Twin stack (Domain 1)
+
+The twin runs the same `thermulator.launch.py`, tagged `TWINNED`, with the arbiter
+off and the battery monitor on:
 
 ```bash
-ros2 launch thermocator delta_thermal.launch.py
-ros2 launch thermocator delta_thermal.launch.py world_name:=thermaria robot_entity_name:=turtlebot3_burger
+ROS_DOMAIN_ID=1 ros2 launch thermocator thermulator.launch.py \
+  use_sim_time:=true goal_source:=TWINNED run_arbiter:=false run_battery_monitor:=true
 ```
-
-> [!NOTE]
-> To find your world name: `ros2 service list | grep set_pose` — the name appears between `/world/` and `/set_pose`. It can also be found in the `<world name="...">` tag of your `.world` file.
 
 ---
 
@@ -271,10 +275,10 @@ Terminal 2: robot thermulator
 
 ```
 Terminal 1: robot bringup <robot_ip>    ← wait for sensors confirmed
-Terminal 2: robot thermulator
-Terminal 3: robot sim                   ← Gazebo on Domain 1
+Terminal 2: robot thermulator           ← LOCAL stack + arbiter (Domain 38)
+Terminal 3: robot sim                   ← twin Gazebo on Domain 1
 Terminal 4: robot bridge                ← connects Domain 38 ↔ Domain 1
-Terminal 5: robot dt                    ← advisory + pose_sync on Domain 1
+Terminal 5: robot twin                  ← TWINNED stack + battery (Domain 1)
 ```
 
 ### Home — simulation only
@@ -286,14 +290,14 @@ Terminal 2: dock remote thermulator
 
 ### Home — simulating lab setup (two sims)
 
-Run the "robot" sim on Domain 38 and the digital twin on Domain 1:
+Run the "robot" sim on Domain 38 and the full digital twin on Domain 1:
 
 ```
-Terminal 1: ROS_DOMAIN_ID=38 ros2 launch my_tb3_world new_world.launch.py
-Terminal 2: ROS_DOMAIN_ID=38 ros2 launch thermocator thermulator.launch.py use_sim_time:=true
-Terminal 3: dock remote dt              ← Domain 1
+Terminal 1: dock remote sim             ← robot sim (Domain 38, gz partition thermulator_robot)
+Terminal 2: dock remote thermulator     ← LOCAL stack + arbiter (Domain 38)
+Terminal 3: dock remote dt              ← twin sim (Domain 1, gz partition thermulator_twin)
 Terminal 4: dock remote bridge          ← no domain ID
-Terminal 5: dock remote dt              ← Domain 1
+Terminal 5: dock remote twin            ← TWINNED stack + battery (Domain 1)
 ```
 
 ---
@@ -325,30 +329,38 @@ Autonomous thermal coverage brain. Operates in two phases:
 
 **Phase 2 — Actor:** Clusters thermally hot cells into action zones and visits each in nearest-neighbour order. Zone centroids are nudged to the nearest navigable costmap cell before being sent as Nav2 goals.
 
-The decision node optionally consumes `/advisory/goal` from the digital twin. Advisory goals are used if they arrive within a configurable staleness window; otherwise the node falls back to its own detection.
+The decision node no longer drives Nav2 directly. It publishes scored goal
+candidates to `/thermocator/goals` (tagged `LOCAL` on Domain 38, `TWINNED` on
+Domain 1) and tracks goal completion locally via robot-pose proximity + timeout
+(no Nav2 action feedback). The `goal_arbiter` is what actually talks to Nav2.
 
-**Subscribes:** `/map`, `/thermal_map`, `/global_costmap/costmap`, `/advisory/goal`
-**Publishes:** `/thermocator/goal_markers`, `/thermocator/action_zones`, `/action_map`
+**Subscribes:** `/map`, `/thermal_map`, `/global_costmap/costmap`
+**Publishes:** `/thermocator/goals` (`thermocator_msgs/msg/GoalCandidate`), `/thermocator/action_zones`, `/action_map`
+
+---
+
+### `goal_arbiter` *(Domain 38)*
+
+Collects goal candidates from every decision node on `/thermocator/goals` — `LOCAL`
+ones published directly on Domain 38 and `TWINNED` ones bridged from Domain 1.
+Each cycle it discards stale candidates, picks the highest-scoring fresh one
+(score = corridor gain / zone strength), sends it to Nav2, and draws a labelled
+marker (`LOCAL` / `TWINNED`) showing which part of the system produced the active
+goal.
+
+**Subscribes:** `/thermocator/goals` (`thermocator_msgs/msg/GoalCandidate`)
+**Publishes:** `/thermocator/goal_markers` (markers)
 **Action client:** `navigate_to_pose` (Nav2)
 
 ---
 
-### `advisory_node` *(digital twin, BUILD_DT=ON)*
+### `battery_monitor` *(digital twin, Domain 1)*
 
-Runs on Domain 1. Receives the real robot's maps and TF via `domain_bridge` and runs the same candidate detection logic as the Explorer. Publishes the best candidate goal as an advisory `PoseStamped` on `/advisory/goal` which is bridged back to Domain 38 for the decision node to consume.
+Part of the "state synced" features. The robot's `/battery_state` is bridged from
+Domain 38 to Domain 1 by `domain_bridge`; this node subscribes and logs the latest
+level to the terminal every 10 seconds.
 
-Has no Nav2 client and sends no commands to any robot.
-
-**Subscribes:** `/map`, `/thermal_map`, `/global_costmap/costmap`
-**Publishes:** `/advisory/goal` (`geometry_msgs/msg/PoseStamped`), `/advisory/candidates` (markers)
-
----
-
-### `pose_sync_node` *(digital twin, BUILD_DT=ON)*
-
-Runs on Domain 1. Reads the real robot's `map → base_footprint` TF (bridged from Domain 38) and teleports the Gazebo sim robot to match using the `/world/<name>/set_pose` service. Rate-limited to 1 Hz with a deadband filter to avoid contact solver instability.
-
-**Requires:** `ros_gz_interfaces`
+**Subscribes:** `/battery_state` (`sensor_msgs/msg/BatteryState`)
 
 ---
 
@@ -420,19 +432,32 @@ The plugin supports configurable cold and hot colors and transparency from the D
 
 ## Digital Twin Architecture
 
-The digital twin couples a Gazebo simulation to the real robot using domain isolation rather than topic remapping. The two stacks run on separate ROS2 domain IDs and are connected by `domain_bridge`.
+The digital twin runs a **full, independent thermocator stack** on Domain 1 (its
+own SLAM, Nav2, thermal map builder and decision node), mirroring Domain 38. The
+two stacks are connected by `domain_bridge`. Because each side produces its own
+`/map`, `/thermal_map` and `/global_costmap`, those are **not** bridged (that would
+create duplicate publishers). Only three things cross domains:
 
 ```
-Domain 38 (robot/robot sim)          Domain 1 (Gazebo DT)
-─────────────────────────            ─────────────────────
-/map              ──────────────────▶ /map
-/thermal_map      ──────────────────▶ /thermal_map
-/global_costmap   ──────────────────▶ /global_costmap
-/odom             ──────────────────▶ /odom
-                  ◀────────────────── /advisory/goal
+Domain 38 (robot / robot sim + arbiter)     Domain 1 (full twin stack + Gazebo)
+──────────────────────────────────────     ──────────────────────────────────
+/cmd_vel            ──────────────────────▶ /cmd_vel      (drives the twin sim)
+/battery_state      ──────────────────────▶ /battery_state(logged every 10 s)
+/thermocator/goals  ◀────────────────────── /thermocator/goals (TWINNED candidates)
 ```
 
-The `advisory_node` on Domain 1 consumes the bridged maps, runs candidate detection, and publishes goal suggestions back to Domain 38. The `pose_sync_node` keeps the Gazebo robot co-located with the real robot for visualization. Neither node sends velocity commands to anything.
+- Both decision nodes publish scored `GoalCandidate`s to `/thermocator/goals`. The
+  twin's are bridged 1 → 38 into the `goal_arbiter`, which selects the best of
+  `LOCAL` vs `TWINNED` by score and sends it to Nav2.
+- The twin robot is **no longer teleported**. It moves along with the real robot's
+  navigation commands via bridged `/cmd_vel`, replayed into Gazebo by `ros_gz_bridge`.
+- Battery level is bridged to the twin and logged there every 10 seconds.
 
 > [!IMPORTANT]
 > `domain_bridge` must be launched without `ROS_DOMAIN_ID` set in the environment. Setting it will break one side of the bridge. The `robot bridge` and `dock remote bridge` services handle this correctly.
+
+> [!NOTE]
+> gz-transport is not isolated by `ROS_DOMAIN_ID`. On the home Docker setup the
+> robot sim and twin sim share a host, so each is launched in its own
+> `GZ_PARTITION` (`thermulator_robot` / `thermulator_twin`). Without this the two
+> Gazebo servers cross-talk and both robots move in unison.

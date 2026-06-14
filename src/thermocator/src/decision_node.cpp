@@ -1,12 +1,10 @@
 #include "thermocator/decision_node.hpp"
-#include "geometry_msgs/msg/pose_stamped.hpp"
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <limits>
+#include <queue>
 #include <rclcpp/logging.hpp>
 #include <string>
 
@@ -57,41 +55,6 @@ void Explorer::handleScanning() {
         return;
     }
 
-    if (ctx_.advisory_goal.advisory_received) {
-        const double age = (ctx_.clock->now() - ctx_.advisory_goal.advisory_stamp).seconds();
-        if (age <= default_params_.advisory_stale_secs) {
-
-            const auto &ci = costmap_copy->info;
-            const int cc = static_cast<int>(
-                (ctx_.advisory_goal.advisory_goal_x - ci.origin.position.x) / ci.resolution);
-            const int cr = static_cast<int>(
-                (ctx_.advisory_goal.advisory_goal_y - ci.origin.position.y) / ci.resolution);
-            const bool navigable =
-                cc >= 0 && cc < (int)ci.width &&
-                cr >= 0 && cr < (int)ci.height &&
-                costmap_copy->data[static_cast<size_t>(cr) * ci.width + cc] >= 0 &&
-                costmap_copy->data[static_cast<size_t>(cr) * ci.width + cc] < 99;
-
-            if (navigable) {
-                RCLCPP_INFO(ctx_.logger,
-                            "[Explorer] Using advisory goal (%.2f,%.2f) age=%.1fs",
-                            ctx_.advisory_goal.advisory_goal_x, ctx_.advisory_goal.advisory_goal_y, age);
-
-                ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
-                _current_goal_x = ctx_.advisory_goal.advisory_goal_x;
-                _current_goal_y = ctx_.advisory_goal.advisory_goal_y;
-                _current_goal_source = GoalSource::ADVISORY;
-                publishGoalMarker(_current_goal_source);
-                sendGoal(ctx_.advisory_goal.advisory_goal_x, ctx_.advisory_goal.advisory_goal_y);
-                ctx_.advisory_goal.advisory_received = false; // consume it
-                state_ = State::NAVIGATING;
-                return;
-            }
-        }
-    }
-
-    RCLCPP_INFO(ctx_.logger, "[Explorer] Advisory goal is stale or not published, falling back to local");
-
     auto ft = detectTargets(
         *thermal_copy, *costmap_copy,
         pose->first, pose->second);
@@ -107,11 +70,7 @@ void Explorer::handleScanning() {
                     best.corridor_gain, best.distance, sample_radius_);
 
         ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
-        _current_goal_x = best.world_x;
-        _current_goal_y = best.world_y;
-        _current_goal_source = GoalSource::LOCAL;
-        publishGoalMarker(_current_goal_source);
-        sendGoal(best.world_x, best.world_y);
+        setGoal(best.world_x, best.world_y, best.corridor_gain);
         state_ = State::NAVIGATING;
         return;
     }
@@ -133,11 +92,9 @@ void Explorer::handleScanning() {
 }
 
 void Explorer::handleNavigating() {
-    checkTimeout();
-
     if (ctx_.goal_failed) {
         ctx_.goal_failed = false;
-        RCLCPP_WARN(ctx_.logger, "[Explorer] Goal failed (%.2f,%.2f)",
+        RCLCPP_WARN(ctx_.logger, "[Explorer] Goal failed/timed out (%.2f,%.2f)",
                     _current_goal_x, _current_goal_y);
         ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
         state_ = State::SCANNING;
@@ -156,7 +113,6 @@ void Explorer::handleNavigating() {
                                .count();
     if (elapsed > default_params_.rescan_interval_seconds) {
         RCLCPP_INFO(ctx_.logger, "[Explorer] Rescan interval -- re-evaluating");
-        ctx_.nav_client->async_cancel_all_goals();
         ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
         state_ = State::SCANNING;
     }
@@ -313,82 +269,16 @@ double Explorer::estimateGain(
     return gain;
 }
 
-void Explorer::sendGoal(double x, double y) {
+void Explorer::setGoal(double x, double y, double score) {
     _current_goal_x = x;
     _current_goal_y = y;
-    nav2_msgs::action::NavigateToPose::Goal goal;
-    goal.pose.header.stamp = ctx_.clock->now();
-    goal.pose.header.frame_id = ctx_.map_frame;
-    goal.pose.pose.position.x = x;
-    goal.pose.pose.position.y = y;
-    goal.pose.pose.orientation.w = 1.0;
-    ctx_.nav_client->async_send_goal(goal, ctx_.send_goal_options);
+    ctx_.current_goal_x = x;
+    ctx_.current_goal_y = y;
+    ctx_.current_score = score;
     ctx_.goal_active = true;
     ctx_.goal_sent_time = std::chrono::steady_clock::now();
-    RCLCPP_INFO(ctx_.logger, "[Explorer] Goal -> (%.2f,%.2f)", x, y);
-}
-
-void Explorer::checkTimeout() {
-    if (!ctx_.goal_active)
-        return;
-    const double e = std::chrono::duration<double>(
-                         std::chrono::steady_clock::now() - ctx_.goal_sent_time)
-                         .count();
-    if (e > default_params_.goal_timeout_seconds) {
-        RCLCPP_WARN(ctx_.logger, "[Explorer] Timeout %.1fs", e);
-        ctx_.nav_client->async_cancel_all_goals();
-        ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
-        state_ = State::SCANNING;
-    }
-}
-
-void Explorer::publishGoalMarker(GoalSource source) {
-    visualization_msgs::msg::MarkerArray ma;
-    visualization_msgs::msg::Marker m;
-
-    if (source == GoalSource::ADVISORY) {
-        m.color.r = 0.0f;
-        m.color.g = 0.5f;
-        m.color.b = 1.0f;
-    } else {
-        m.color.r = 0.4f;
-        m.color.g = 1.0f;
-        m.color.b = 0.0f;
-    }
-
-    m.header.stamp = ctx_.clock->now();
-    m.header.frame_id = ctx_.map_frame;
-    m.ns = "visited_frontiers";
-    m.id = ctx_.marker_id;
-    m.type = visualization_msgs::msg::Marker::SPHERE;
-    m.action = visualization_msgs::msg::Marker::ADD;
-    m.pose.position.x = _current_goal_x;
-    m.pose.position.y = _current_goal_y;
-    m.pose.position.z = 0.05;
-    m.pose.orientation.w = 1.0;
-    m.scale.x = m.scale.y = m.scale.z = 0.12;
-    m.color.a = 0.8f;
-    m.lifetime = rclcpp::Duration::from_seconds(0);
-    ma.markers.push_back(m);
-
-    visualization_msgs::msg::Marker t;
-    t.header = m.header;
-    t.ns = "goal_source";
-    t.id = ctx_.marker_id++; // same id as sphere, different ns
-    t.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
-    t.action = visualization_msgs::msg::Marker::ADD;
-    t.pose.position.x = _current_goal_x;
-    t.pose.position.y = _current_goal_y;
-    t.pose.position.z = 0.25;
-    t.pose.orientation.w = 1.0;
-    t.scale.z = 0.1f;
-    t.color.r = t.color.g = t.color.b = 1.0f;
-    t.color.a = 1.0f;
-    t.text = (source == GoalSource::ADVISORY) ? "ADVISORY" : "LOCAL";
-    t.lifetime = rclcpp::Duration::from_seconds(0);
-    ma.markers.push_back(t);
-
-    ctx_.goal_marker_pub->publish(ma);
+    RCLCPP_INFO(ctx_.logger, "[Explorer] Candidate -> (%.2f,%.2f) score=%.1f src=%s",
+                x, y, score, ctx_.goal_source.c_str());
 }
 
 std::optional<std::pair<double, double>> Explorer::getRobotPose() const {
@@ -404,6 +294,7 @@ std::optional<std::pair<double, double>> Explorer::getRobotPose() const {
         return std::nullopt;
     }
 }
+
 Actor::Actor(NodeContext &ctx, const Params &p)
     : ctx_(ctx), params_(p) {}
 
@@ -470,7 +361,7 @@ void Actor::handleNavigating() {
         ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
         if (current_idx_ < route_.size()) {
             const auto &z = zones_[route_[current_idx_]];
-            sendGoal(z.world_x, z.world_y);
+            setGoal(z.world_x, z.world_y, z.strength);
         }
         return;
     }
@@ -485,7 +376,7 @@ void Actor::handleNavigating() {
     if (!ctx_.goal_active) {
         const auto &z = zones_[route_[current_idx_]];
         publishZoneMarker(z, static_cast<int>(current_idx_));
-        sendGoal(z.world_x, z.world_y);
+        setGoal(z.world_x, z.world_y, z.strength);
     }
 }
 
@@ -699,7 +590,7 @@ void Actor::publishActionMap(const ActionZone &zone) {
     ctx_.action_map_pub->publish(msg);
 }
 
-void Actor::sendGoal(double x, double y) {
+void Actor::setGoal(double x, double y, double score) {
     const auto pose = getRobotPose();
     if (pose.has_value()) {
         const double dx = pose->first - x;
@@ -711,18 +602,14 @@ void Actor::sendGoal(double x, double y) {
         }
     }
 
-    nav2_msgs::action::NavigateToPose::Goal goal;
-    goal.pose.header.stamp = ctx_.clock->now();
-    goal.pose.header.frame_id = ctx_.map_frame;
-    goal.pose.pose.position.x = x;
-    goal.pose.pose.position.y = y;
-    goal.pose.pose.orientation.w = 1.0;
-
-    ctx_.nav_client->async_send_goal(goal, ctx_.send_goal_options);
+    ctx_.current_goal_x = x;
+    ctx_.current_goal_y = y;
+    ctx_.current_score = score;
     ctx_.goal_active = true;
     ctx_.goal_sent_time = std::chrono::steady_clock::now();
 
-    RCLCPP_INFO(ctx_.logger, "[Actor] Goal -> (%.2f,%.2f)", x, y);
+    RCLCPP_INFO(ctx_.logger, "[Actor] Candidate -> (%.2f,%.2f) score=%.1f src=%s",
+                x, y, score, ctx_.goal_source.c_str());
 }
 
 std::optional<std::pair<double, double>> Actor::getRobotPose() const {
@@ -742,17 +629,18 @@ std::optional<std::pair<double, double>> Actor::getRobotPose() const {
 DecisionNode::DecisionNode() : Node("decision_node") {
     declare_parameter("map_frame", std::string("map"));
     declare_parameter("robot_frame", std::string("base_footprint"));
+    declare_parameter("goal_source", std::string("LOCAL"));
+    declare_parameter("arrival_radius", 0.4);
     declare_parameter("coverage_threshold", 0.95);
     declare_parameter("sensor_coverage_radius", 0.3);
     declare_parameter("goal_min_distance", 0.5);
-    declare_parameter("goal_timeout_seconds", 30.0);
+    declare_parameter("goal_timeout_seconds", 70.0);
     declare_parameter("rescan_interval_seconds", 8.0);
     declare_parameter("radius_initial", 1.5);
     declare_parameter("radius_step", 0.5);
     declare_parameter("radius_max", 8.0);
     declare_parameter("samples_per_cycle", 40);
     declare_parameter("corridor_bonus", 0.3);
-    declare_parameter("advisory_stale_secs", 3.0);
 
     declare_parameter("min_frontier_size", 3);
     declare_parameter("action_zone_heat_threshold", 60.0);
@@ -765,11 +653,10 @@ DecisionNode::DecisionNode() : Node("decision_node") {
     const std::string map_frame = get_parameter("map_frame").as_string();
     const std::string robot_frame = get_parameter("robot_frame").as_string();
     const double control_rate = get_parameter("control_rate").as_double();
+    goal_timeout_seconds_ = get_parameter("goal_timeout_seconds").as_double();
 
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-    nav_client_ = rclcpp_action::create_client<
-        nav2_msgs::action::NavigateToPose>(this, "navigate_to_pose");
 
     rclcpp::QoS latch(1);
     latch.transient_local().reliable();
@@ -779,42 +666,20 @@ DecisionNode::DecisionNode() : Node("decision_node") {
     ctx_.logger = get_logger();
     ctx_.clock = get_clock();
     ctx_.tf_buffer = tf_buffer_;
-    ctx_.nav_client = nav_client_;
     ctx_.map_mutex = map_mutex_;
     ctx_.map_frame = map_frame;
     ctx_.robot_frame = robot_frame;
+    ctx_.goal_source = get_parameter("goal_source").as_string();
+    ctx_.arrival_radius = get_parameter("arrival_radius").as_double();
+
+    ctx_.goal_pub = create_publisher<thermocator_msgs::msg::GoalCandidate>(
+        "/thermocator/goals", rclcpp::QoS(10).reliable());
     ctx_.action_map_pub =
         create_publisher<nav_msgs::msg::OccupancyGrid>("/action_map", latch);
-    ctx_.goal_marker_pub =
-        create_publisher<visualization_msgs::msg::MarkerArray>(
-            "/thermocator/goal_markers",
-            rclcpp::QoS(1).transient_local().reliable());
     ctx_.zone_marker_pub =
         create_publisher<visualization_msgs::msg::MarkerArray>(
             "/thermocator/action_zones",
             rclcpp::QoS(1).transient_local().reliable());
-
-    ctx_.advisory_sub =
-        create_subscription<geometry_msgs::msg::PoseStamped>(
-            "/advisory/goal",
-            rclcpp::QoS(1).reliable(),
-            [this](geometry_msgs::msg::PoseStamped::SharedPtr msg) {
-                std::lock_guard<std::mutex> lock(*map_mutex_);
-                ctx_.advisory_goal.advisory_goal_x = msg->pose.position.x;
-                ctx_.advisory_goal.advisory_goal_y = msg->pose.position.y;
-                ctx_.advisory_goal.advisory_stamp = msg->header.stamp;
-                ctx_.advisory_goal.advisory_received = true;
-            });
-
-    ctx_.send_goal_options.goal_response_callback =
-        std::bind(&DecisionNode::goalResponseCallback, this,
-                  std::placeholders::_1);
-    ctx_.send_goal_options.feedback_callback =
-        std::bind(&DecisionNode::feedbackCallback, this,
-                  std::placeholders::_1, std::placeholders::_2);
-    ctx_.send_goal_options.result_callback =
-        std::bind(&DecisionNode::resultCallback, this,
-                  std::placeholders::_1);
 
     thermal_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
         "/thermal_map", latch,
@@ -833,14 +698,13 @@ DecisionNode::DecisionNode() : Node("decision_node") {
     ep.coverage_threshold = get_parameter("coverage_threshold").as_double();
     ep.sensor_coverage_radius = get_parameter("sensor_coverage_radius").as_double();
     ep.goal_min_distance = get_parameter("goal_min_distance").as_double();
-    ep.goal_timeout_seconds = get_parameter("goal_timeout_seconds").as_double();
+    ep.goal_timeout_seconds = goal_timeout_seconds_;
     ep.rescan_interval_seconds = get_parameter("rescan_interval_seconds").as_double();
     ep.radius_initial = get_parameter("radius_initial").as_double();
     ep.radius_step = get_parameter("radius_step").as_double();
     ep.radius_max = get_parameter("radius_max").as_double();
     ep.samples_per_cycle = get_parameter("samples_per_cycle").as_int();
     ep.corridor_bonus = get_parameter("corridor_bonus").as_double();
-    ep.advisory_stale_secs = get_parameter("advisory_stale_secs").as_double();
     explorer_ = std::make_unique<Explorer>(ctx_, ep);
 
     Actor::Params ap;
@@ -856,7 +720,8 @@ DecisionNode::DecisionNode() : Node("decision_node") {
         std::chrono::duration_cast<std::chrono::nanoseconds>(period),
         std::bind(&DecisionNode::controlLoop, this));
 
-    RCLCPP_INFO(get_logger(), "DecisionNode ready");
+    RCLCPP_INFO(get_logger(), "DecisionNode ready -- source=%s",
+                ctx_.goal_source.c_str());
 }
 
 void DecisionNode::thermalMapCallback(
@@ -877,6 +742,52 @@ void DecisionNode::costmapCallback(
     ctx_.costmap = msg;
 }
 
+void DecisionNode::updateGoalStatus() {
+    if (!ctx_.goal_active)
+        return;
+
+    std::optional<std::pair<double, double>> pose;
+    try {
+        const auto t = tf_buffer_->lookupTransform(
+            ctx_.map_frame, ctx_.robot_frame,
+            rclcpp::Time(0), rclcpp::Duration::from_seconds(0.1));
+        pose = std::make_pair(t.transform.translation.x, t.transform.translation.y);
+    } catch (const tf2::TransformException &) {
+        pose = std::nullopt;
+    }
+
+    if (pose.has_value()) {
+        const double dx = pose->first - ctx_.current_goal_x;
+        const double dy = pose->second - ctx_.current_goal_y;
+        if (std::sqrt(dx * dx + dy * dy) <= ctx_.arrival_radius) {
+            ctx_.goal_succeeded = true;
+            ctx_.goal_active = false;
+            return;
+        }
+    }
+
+    const double elapsed = std::chrono::duration<double>(
+                               std::chrono::steady_clock::now() - ctx_.goal_sent_time)
+                               .count();
+    if (elapsed > goal_timeout_seconds_) {
+        RCLCPP_WARN(get_logger(), "[Decision] goal timeout %.1fs", elapsed);
+        ctx_.goal_failed = true;
+        ctx_.goal_active = false;
+    }
+}
+
+void DecisionNode::publishCurrentCandidate() {
+    thermocator_msgs::msg::GoalCandidate cand;
+    cand.pose.header.stamp = now();
+    cand.pose.header.frame_id = ctx_.map_frame;
+    cand.pose.pose.position.x = ctx_.current_goal_x;
+    cand.pose.pose.position.y = ctx_.current_goal_y;
+    cand.pose.pose.orientation.w = 1.0;
+    cand.source = ctx_.goal_source;
+    cand.score = ctx_.current_score;
+    ctx_.goal_pub->publish(cand);
+}
+
 void DecisionNode::controlLoop() {
     if (phase_ == Phase::WAITING) {
         bool ready;
@@ -889,66 +800,30 @@ void DecisionNode::controlLoop() {
                                  "Waiting for maps and costmap ...");
             return;
         }
-        if (!nav_client_->wait_for_action_server(
-                std::chrono::milliseconds(100))) {
-            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
-                                 "Waiting for Nav2 ...");
-            return;
-        }
         RCLCPP_INFO(get_logger(), "Ready -- Phase 1");
         phase_ = Phase::PHASE1;
     }
+
+    updateGoalStatus();
 
     if (phase_ == Phase::PHASE1) {
         if (explorer_->update()) {
             RCLCPP_INFO(get_logger(), "Phase 1 done -- Phase 2");
             phase_ = Phase::PHASE2;
         }
-        return;
-    }
-
-    if (phase_ == Phase::PHASE2) {
+    } else if (phase_ == Phase::PHASE2) {
         if (actor_->update()) {
             RCLCPP_INFO(get_logger(), "Phase 2 done -- mission complete");
             phase_ = Phase::DONE;
         }
-        return;
+    } else {
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 30000,
+                             "Mission complete");
     }
 
-    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 30000,
-                         "Mission complete");
-}
-
-void DecisionNode::goalResponseCallback(
-    const rclcpp_action::ClientGoalHandle<
-        nav2_msgs::action::NavigateToPose>::SharedPtr &handle) {
-    if (!handle) {
-        ctx_.goal_active = false;
-        ctx_.goal_failed = true;
-        RCLCPP_WARN(get_logger(), "Goal rejected");
-        return;
-    }
-    current_goal_handle_ = handle;
-}
-
-void DecisionNode::feedbackCallback(
-    rclcpp_action::ClientGoalHandle<
-        nav2_msgs::action::NavigateToPose>::SharedPtr,
-    const std::shared_ptr<
-        const nav2_msgs::action::NavigateToPose::Feedback>
-        fb) {
-    RCLCPP_DEBUG(get_logger(),
-                 "Remaining: %.2fm", fb->distance_remaining);
-}
-
-void DecisionNode::resultCallback(
-    const rclcpp_action::ClientGoalHandle<
-        nav2_msgs::action::NavigateToPose>::WrappedResult &result) {
-    ctx_.goal_active = false;
-    if (result.code == rclcpp_action::ResultCode::SUCCEEDED)
-        ctx_.goal_succeeded = true;
-    else
-        ctx_.goal_failed = true;
+    // Heartbeat: keep the arbiter's view of this proposer's goal fresh.
+    if (ctx_.goal_active)
+        publishCurrentCandidate();
 }
 
 } // namespace thermocator

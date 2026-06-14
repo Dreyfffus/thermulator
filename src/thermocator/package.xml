@@ -23,21 +23,13 @@
   <depend>builtin_interfaces</depend>
   <depend>geometry_msgs</depend>
   <depend>visualization_msgs</depend>
+  <depend>thermocator_msgs</depend>
 
   <!-- ── RViz2 display plugin ──────────────────────────────────────────── -->
   <depend>rviz_common</depend>
   <depend>rviz_rendering</depend>
   <depend>rviz_ogre_vendor</depend>
   <depend>pluginlib</depend>
-
-  <!-- ── Digital twin nodes (only used when BUILD_DT=ON) ──────────────────
-       ros_gz_interfaces is listed here so rosdep can resolve it on machines
-       where the DT stack is built.  On physical-robot-only deployments this
-       package will be present but its targets are never built.
-       If Gazebo is not installed on the target machine, exclude this with:
-         rosdep install - -ignore-packages-from-source - -skip-keys ros_gz_interfaces
-  ──────────────────────────────────────────────────────────────────────── -->
-  <depend>ros_gz_interfaces</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
@@ -46,3 +38,4 @@
     <build_type>ament_cmake</build_type>
   </export>
 </package>
+

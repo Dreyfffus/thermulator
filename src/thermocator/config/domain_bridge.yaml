@@ -4,69 +4,60 @@
 #  Install domain_bridge:
 #    sudo apt install ros-jazzy-domain-bridge
 #
-#  This replaces DtMediator entirely.
 #  domain_bridge runs as a single process that holds
-#  subscriptions in both domains simultaneously — something
+#  subscriptions in both domains simultaneously -- something
 #  a regular rclcpp node cannot do.
 #
-#  Domain 38 = physical robot/navigation stack
-#  Domain 1 = Gazebo digital twin
+#  Domain 38 = physical robot / robot-sim + navigation stack
+#  Domain 1  = digital twin (full thermocator stack + Gazebo)
+#
+#  twin design:
+#    - The twin runs its OWN full thermocator stack (SLAM, Nav2,
+#      thermal map builder, decision node), so /map, /thermal_map
+#      and /global_costmap are produced locally on each domain and
+#      are NO LONGER bridged (that would create duplicate publishers).
+#    - Each decision node publishes scored goal candidates; the
+#      twin's candidates are bridged 1 -> 38 to the goal_arbiter.
+#    - The twin robot is no longer teleported. It moves along with
+#      the real robot's navigation commands, so /cmd_vel is bridged
+#      38 -> 1 and replayed into the twin's Gazebo by ros_gz_bridge.
+#    - Battery state is bridged 38 -> 1 ("state synced") for logging.
 # ============================================================
 
 name: thermocator_domain_bridge
 topics:
-  # Domain 38 -> Domain 1: physical/navigation state into the digital twin.
-  map:
-    type: nav_msgs/msg/OccupancyGrid
+  # Domain 38 -> Domain 1: drive the twin with the real robot's nav commands.
+  cmd_vel:
+    type: geometry_msgs/msg/TwistStamped
     from_domain: 38
     to_domain: 1
-    wait_for_publisher: true
-    qos:
-      reliability: reliable
-      durability: transient_local
-      history: keep_last
-      depth: 1
-
-  thermal_map:
-    type: nav_msgs/msg/OccupancyGrid
-    from_domain: 38
-    to_domain: 1
-    wait_for_publisher: true
-    qos:
-      reliability: reliable
-      durability: transient_local
-      history: keep_last
-      depth: 1
-
-  global_costmap/costmap:
-    type: nav_msgs/msg/OccupancyGrid
-    from_domain: 38
-    to_domain: 1
-    wait_for_publisher: true
-    qos:
-      reliability: reliable
-      durability: transient_local
-      history: keep_last
-      depth: 1
-
-  odom:
-    type: nav_msgs/msg/Odometry
-    from_domain: 38
-    to_domain: 1
-    wait_for_publisher: true
+    wait_for_publisher: false
     qos:
       reliability: reliable
       durability: volatile
       history: keep_last
       depth: 10
 
-  # Domain 1 -> Domain 38: advisory only. No cmd_vel, odometry, or sensor data.
-  advisory/goal:
-    type: geometry_msgs/msg/PoseStamped
-    from_domain: 1
-    to_domain: 38
-    wait_for_publisher: true
+  # Domain 38 -> Domain 1: battery level synced to the twin for logging.
+  battery_state:
+    type: sensor_msgs/msg/BatteryState
+    from_domain: 38
+    to_domain: 1
+    wait_for_publisher: false
     qos:
       reliability: reliable
+      durability: volatile
       history: keep_last
-      depth: 1
+      depth: 10
+
+  # Domain 1 -> Domain 38: twin's scored goal candidates into the arbiter.
+  thermocator/goals:
+    type: thermocator_msgs/msg/GoalCandidate
+    from_domain: 1
+    to_domain: 38
+    wait_for_publisher: false
+    qos:
+      reliability: reliable
+      durability: volatile
+      history: keep_last
+      depth: 10

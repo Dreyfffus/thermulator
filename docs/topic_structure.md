@@ -8,37 +8,49 @@
 - `/tf`: dynamic transforms.
 - `/tf_static`: static transforms.
 - `/map`: occupancy grid from SLAM or map server.
+- `/battery_state`: robot battery level (`sensor_msgs/msg/BatteryState`).
 
 ## Thermal mapping topics
 
 - `/thermal_reading`: simulated thermal sensor reading from `thermal_broadcaster`.
 - `/thermal_map`: occupancy-grid style thermal map from `thermocator`.
 
+## Goal arbitration topics
+
+- `/thermocator/goals` (`thermocator_msgs/msg/GoalCandidate`): scored goal
+  candidates published by every decision node. Each carries the goal pose, a
+  `source` tag (`LOCAL` / `TWINNED`) and a `score`.
+- `/thermocator/goal_markers`: arbiter marker showing the active goal + source.
+- `/thermocator/action_zones`, `/action_map`: decision-node action-phase output.
+
 ## Digital twin bridge topics
 
-- Domain 38 `/map` -> Domain 1 `/map`
-- Domain 38 `/thermal_map` -> Domain 1 `/thermal_map`
-- Domain 38 `/global_costmap/costmap` -> Domain 1 `/global_costmap/costmap`
-- Domain 38 `/odom` -> Domain 1 `/odom`
-- Domain 1 `/advisory/goal` -> Domain 38 `/advisory/goal`
+Both domains run a full, independent stack, so `/map`, `/thermal_map` and
+`/global_costmap` are produced locally and are **not** bridged. Only:
 
-## Advisory flow
+- Domain 38 `/cmd_vel` -> Domain 1 `/cmd_vel`  (drives the twin sim)
+- Domain 38 `/battery_state` -> Domain 1 `/battery_state`  (state synced, logged)
+- Domain 1 `/thermocator/goals` -> Domain 38 `/thermocator/goals`  (TWINNED candidates)
 
-1. The physical robot stack publishes maps, costmap, thermal map, and odometry on Domain 38.
-2. `domain_bridge` republishes those selected topics into Domain 1.
-3. `advisory_node` consumes the bridged state and publishes `/advisory/goal` on Domain 1.
-4. `domain_bridge` republishes `/advisory/goal` back into Domain 38 for `decision_node`.
+## Goal flow
 
-## Gazebo DT flow
+1. The Domain 38 decision node publishes `LOCAL` candidates to `/thermocator/goals`.
+2. The Domain 1 decision node publishes `TWINNED` candidates; `domain_bridge`
+   forwards them 1 -> 38 onto the same topic.
+3. `goal_arbiter` (Domain 38) keeps the latest fresh candidate per source, picks
+   the highest score, sends it to Nav2, and marks it `LOCAL` / `TWINNED` in RViz.
 
-1. `delta_thermulator.launch.py` starts Gazebo on Domain 1.
-2. `ros_gz_bridge` bridges Gazebo `/clock`, `/scan`, `/odom`, `/tf`, and `/tf_static` into ROS on Domain 1.
-3. `pose_sync_node` reads bridged `/odom` from Domain 38 and calls `/world/thermaria/set_pose` to keep the Gazebo model aligned.
+## Twin motion flow
 
-## Map and thermal flow
+1. The arbiter's chosen goal drives Domain 38 Nav2, which publishes `/cmd_vel`.
+2. `domain_bridge` forwards `/cmd_vel` 38 -> 1.
+3. `ros_gz_bridge` (Domain 1, in its own `GZ_PARTITION`) replays it into the twin
+   Gazebo, so the twin moves along with the real robot instead of being teleported.
 
-1. SLAM or map server publishes `/map`.
+## Map and thermal flow (per domain, independent)
+
+1. SLAM (Cartographer) publishes `/map`.
 2. `thermocator` initializes from `/map`.
 3. `thermal_broadcaster` publishes `/thermal_reading`.
 4. `thermocator` publishes `/thermal_map`.
-5. `domain_bridge` makes `/map` and `/thermal_map` available to Domain 1.
+

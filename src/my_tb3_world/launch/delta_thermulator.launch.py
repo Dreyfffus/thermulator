@@ -30,6 +30,14 @@ def generate_launch_description():
 
     set_domain = SetEnvironmentVariable("ROS_DOMAIN_ID", "1")
 
+    # gz-transport is NOT isolated by ROS_DOMAIN_ID. On the home Docker setup the
+    # robot sim and the twin sim run on the same host, so without a unique
+    # partition their Gazebo servers and ros_gz_bridge instances share the same
+    # gz topics (/cmd_vel, /odom, ...) and both robots move in unison. A distinct
+    # GZ_PARTITION per simulation keeps each Gazebo + bridge fully separated, so
+    # the twin only moves from the /cmd_vel explicitly bridged in by domain_bridge.
+    set_gz_partition = SetEnvironmentVariable("GZ_PARTITION", "thermulator_twin")
+
     set_env_vars_resources = AppendEnvironmentVariable(
         "GZ_SIM_RESOURCE_PATH",
         os.path.join(get_package_share_directory("turtlebot3_gazebo"), "models"),
@@ -41,7 +49,6 @@ def generate_launch_description():
         package="ros_gz_bridge",
         executable="parameter_bridge",
         name="ros_gz_bridge",
-        arguments=["/world/thermaria/set_pose@ros_gz_interfaces/srv/SetEntityPose"],
         parameters=[{"config_file": bridge_config, "use_sim_time": use_sim_time}],
         output="screen",
     )
@@ -106,6 +113,7 @@ def generate_launch_description():
         )
     )
     ld.add_action(set_domain)  # must be first
+    ld.add_action(set_gz_partition)  # isolate gz-transport from the robot sim
     ld.add_action(set_env_vars_resources)
     ld.add_action(gzserver_cmd)
     ld.add_action(ros_gz_bridge)

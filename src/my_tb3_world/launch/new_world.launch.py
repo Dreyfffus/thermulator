@@ -6,6 +6,7 @@ from launch.actions import (
     AppendEnvironmentVariable,
     DeclareLaunchArgument,
     IncludeLaunchDescription,
+    SetEnvironmentVariable,
 )
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -25,6 +26,11 @@ def generate_launch_description():
     y_pose = LaunchConfiguration("y_pose", default="0.0")
 
     world = os.path.join(my_pkg_share, "worlds", "new_world.world")
+
+    # Unique gz-transport partition for the robot sim. The twin sim uses a
+    # different one ("thermulator_twin"), so the two Gazebo servers/bridges on
+    # the same host no longer cross-talk and drive both robots in unison.
+    set_gz_partition = SetEnvironmentVariable("GZ_PARTITION", "thermulator_robot")
 
     set_env_vars_resources = AppendEnvironmentVariable(
         "GZ_SIM_RESOURCE_PATH",
@@ -74,6 +80,7 @@ def generate_launch_description():
             description="Start the Gazebo GUI client. Keep false for headless topic tests.",
         )
     )
+    ld.add_action(set_gz_partition)  # isolate gz-transport from the twin sim
     ld.add_action(set_env_vars_resources)
     ld.add_action(gzserver_cmd)
     ld.add_action(gzclient_cmd)

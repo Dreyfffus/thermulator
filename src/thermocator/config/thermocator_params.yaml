@@ -33,6 +33,11 @@ decision_node:
     robot_frame: "base_footprint"
     control_rate: 1.0
 
+    # goal_source and arrival_radius are normally set from the launch args
+    # (LOCAL on Domain 38, TWINNED on Domain 1). Values here are fallbacks.
+    goal_source: "LOCAL"
+    arrival_radius: 0.4
+
     coverage_threshold: 0.95
     sensor_coverage_radius: 0.5
     goal_min_distance: 0.5
@@ -42,7 +47,6 @@ decision_node:
     radius_step: 0.5
     radius_max: 8.0
     samples_per_cycle: 40
-    advisory_stale_secs: 4.0
     corridor_bonus: 0.3
 
     action_zone_heat_threshold: 60.0
@@ -50,3 +54,17 @@ decision_node:
     action_zone_base_sigma: 0.4
     action_delay_seconds: 1.0
     max_search_cells: 250
+
+goal_arbiter:
+  ros__parameters:
+    map_frame: "map"
+    control_rate: 1.0
+    candidate_stale_secs: 5.0
+    goal_timeout_seconds: 70.0
+    resend_min_distance: 0.5
+    resend_score_margin: 1.0
+
+battery_monitor:
+  ros__parameters:
+    battery_topic: "/battery_state"
+    log_period_seconds: 10.0

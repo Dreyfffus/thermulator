@@ -25,6 +25,11 @@ def generate_launch_description():
     robot_frame_arg = DeclareLaunchArgument(
         "robot_frame", default_value="base_footprint"
     )
+    # "LOCAL" on Domain 38, "TWINNED" on Domain 1. The decision node tags every
+    # goal candidate it publishes to /thermocator/goals with this source so the
+    # arbiter can tell where the goal came from.
+    goal_source_arg = DeclareLaunchArgument("goal_source", default_value="LOCAL")
+    arrival_radius_arg = DeclareLaunchArgument("arrival_radius", default_value="0.4")
 
     # Broadcaster
     zone_centers_x_arg = DeclareLaunchArgument(
@@ -70,9 +75,6 @@ def generate_launch_description():
     samples_per_cycle_arg = DeclareLaunchArgument(
         "samples_per_cycle", default_value="40"
     )
-    advisory_stale_secs_arg = DeclareLaunchArgument(
-        "advisory_stale_secs", default_value="3.0"
-    )
     corridor_bonus_arg = DeclareLaunchArgument("corridor_bonus", default_value="0.3")
 
     # Decision node -- Phase 2
@@ -96,13 +98,23 @@ def generate_launch_description():
     def launch_nodes(context):
         params_file = LaunchConfiguration("params_file").perform(context)
         use_sim_time = LaunchConfiguration("use_sim_time").perform(context) == "true"
+        goal_source = LaunchConfiguration("goal_source").perform(context)
+        arrival_radius = float(LaunchConfiguration("arrival_radius").perform(context))
         use_yaml = os.path.isfile(params_file)
+
+        # goal_source / arrival_radius always come from the launch args so the
+        # same params file can be shared by the LOCAL and TWINNED stacks.
+        decision_overrides = {
+            "use_sim_time": use_sim_time,
+            "goal_source": goal_source,
+            "arrival_radius": arrival_radius,
+        }
 
         if use_yaml:
             print(f"[thermocator.launch] Loading parameters from: {params_file}")
             broadcaster_params = [params_file, {"use_sim_time": use_sim_time}]
             map_builder_params = [params_file, {"use_sim_time": use_sim_time}]
-            decision_params = [params_file, {"use_sim_time": use_sim_time}]
+            decision_params = [params_file, decision_overrides]
         else:
             print(
                 f"[thermocator.launch] No yaml at {params_file} -- using launch arguments"
@@ -161,6 +173,8 @@ def generate_launch_description():
             decision_params = [
                 {
                     "use_sim_time": use_sim_time,
+                    "goal_source": goal_source,
+                    "arrival_radius": arrival_radius,
                     "map_frame": s("map_frame"),
                     "robot_frame": s("robot_frame"),
                     "coverage_threshold": f("coverage_threshold"),
@@ -172,7 +186,6 @@ def generate_launch_description():
                     "radius_step": f("radius_step"),
                     "radius_max": f("radius_max"),
                     "samples_per_cycle": i("samples_per_cycle"),
-                    "advisory_stale_secs": f("advisory_stale_secs"),
                     "corridor_bonus": f("corridor_bonus"),
                     "action_zone_heat_threshold": f("action_zone_heat_threshold"),
                     "action_zone_cluster_radius": f("action_zone_cluster_radius"),
@@ -225,6 +238,8 @@ def generate_launch_description():
             use_sim_time_arg,
             map_frame_arg,
             robot_frame_arg,
+            goal_source_arg,
+            arrival_radius_arg,
             zone_centers_x_arg,
             zone_centers_y_arg,
             zone_peak_temps_arg,
@@ -244,7 +259,6 @@ def generate_launch_description():
             radius_step_arg,
             radius_max_arg,
             samples_per_cycle_arg,
-            advisory_stale_secs_arg,
             corridor_bonus_arg,
             action_zone_heat_threshold_arg,
             action_zone_cluster_radius_arg,

@@ -67,22 +67,22 @@ if [ -z "$attach" ]; then
     echo "Services (remote):"
     echo "  teleop       -- keyboard teleoperation"
     echo "  rviz         -- Cartographer SLAM + RViz2 with thermocator config"
-    echo "  sim          -- Gazebo simulation world (Domain ${SIM_DOMAIN_ID})"
+    echo "  sim          -- Robot-side Gazebo world (Domain ${ROBOT_DOMAIN_ID})"
     echo "  nav          -- Nav2 navigation stack"
     echo "  lifecycle    -- Nav2 lifecycle manager"
     echo "  thermal      -- ThermalMapBuilder node"
     echo "  broadcaster  -- ThermalBroadcaster (simulated sensor)"
     echo "  decision     -- DecisionNode (frontier exploration + actioning)"
     echo "  thermocator  -- Full thermocator pipeline (broadcaster + map builder + decision)"
-    echo "  thermulator  -- Entire stack (Cartographer + Nav2 + thermocator + RViz2)"
+    echo "  thermulator  -- LOCAL stack: Cartographer + Nav2 + thermocator + arbiter"
+    echo "  arbiter      -- GoalArbiter only (selects best LOCAL/TWINNED goal)"
     echo "  build        -- Build workspace (optional: [package])"
     echo ""
     echo "  Digital twin (Domain ${SIM_DOMAIN_ID} <-> Domain ${ROBOT_DOMAIN_ID}):"
+    echo "  dt           -- Twin Gazebo world (Domain ${SIM_DOMAIN_ID})"
+    echo "  twin         -- TWINNED stack: full thermocator (publishes goals) + battery monitor"
+    echo "  battery      -- BatteryMonitor only (logs bridged battery every 10s)"
     echo "  bridge       -- domain_bridge only"
-    echo "  advisory     -- AdvisoryNode only"
-    echo "  pose_sync    -- PoseSyncNode only"
-    echo "  delta_thermal-- Full DT stack (bridge + advisory + pose_sync)"
-    echo "  build_dt     -- Build workspace with digital twin nodes (BUILD_DT=ON)"
     exit 1
 fi
 
@@ -212,7 +212,27 @@ case "$attach" in
                 docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
                     "${SETUP} && \
                      ros2 launch thermocator thermulator.launch.py \
-                     use_sim_time:=true"
+                     use_sim_time:=true goal_source:=LOCAL run_arbiter:=true"
+                ;;
+
+            twin)
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
+                    "${DT_SETUP} && \
+                     ros2 launch thermocator thermulator.launch.py \
+                     use_sim_time:=true goal_source:=TWINNED \
+                     run_arbiter:=false run_battery_monitor:=true"
+                ;;
+
+            arbiter)
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
+                    "${SETUP} && \
+                     ros2 run thermocator goal_arbiter"
+                ;;
+
+            battery)
+                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
+                    "${DT_SETUP} && \
+                     ros2 run thermocator battery_monitor"
                 ;;
 
             build)
@@ -239,44 +259,6 @@ case "$attach" in
                      ros2 launch thermocator thermic_bridge.launch.py"
                 ;;
 
-            advisory)
-                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
-                    "${DT_SETUP} && \
-                     ros2 run thermocator advisory_node"
-                ;;
-
-            pose_sync)
-                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
-                    "${DT_SETUP} && \
-                     ros2 run thermocator pose_sync_node"
-                ;;
-
-            delta_thermal)
-                docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
-                    "${BRIDGE_SETUP} && \
-                     export ROS_DOMAIN_ID=${SIM_DOMAIN_ID}
-                     ros2 launch thermocator delta_thermal.launch.py"
-                ;;
-
-            build_dt)
-                if [ -n "$package" ]; then
-                    echo "Building package (with DT nodes): $package"
-                    docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
-                        "${SETUP} && \
-                         cd /ws && colcon build \
-                         --packages-select ${package} --symlink-install \
-                         --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-                                      -DBUILD_DT=ON"
-                else
-                    echo "Building all packages (with DT nodes) ..."
-                    docker exec ${DOCKER_TTY} turtlebot3_container bash -c \
-                        "${SETUP} && \
-                         cd /ws && colcon build --symlink-install \
-                         --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-                                      -DBUILD_DT=ON"
-                fi
-                ;;
-
             *)
                 echo "Error: unknown service '$service'"
                 echo "Run $0 without arguments to see usage"
@@ -291,3 +273,4 @@ case "$attach" in
         exit 1
         ;;
 esac
+
