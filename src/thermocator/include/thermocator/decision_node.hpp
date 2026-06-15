@@ -17,6 +17,7 @@
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "thermocator/action_grid.hpp"
 #include "thermocator/node_context.hpp"
+#include "thermocator_msgs/msg/mission_state.hpp"
 
 namespace thermocator {
 
@@ -114,6 +115,16 @@ class Actor {
     bool update();
     bool isComplete() const { return complete_; }
 
+    // Detect the current action zones from the given maps (used by the decision
+    // node to build/merge the agreed plan at the Explore -> Act transition).
+    std::vector<ActionZone> computeZones(
+        const nav_msgs::msg::OccupancyGrid &costmap,
+        const nav_msgs::msg::OccupancyGrid &thermal) const;
+
+    // Install the agreed plan. The Actor will (re-)plan from these zones,
+    // nudging each to a locally navigable cell before visiting it.
+    void setPlan(const std::vector<ActionZone> &zones);
+
   private:
     enum class State {
         PLANNING,
@@ -145,6 +156,8 @@ class Actor {
     State state_ = State::PLANNING;
     bool complete_ = false;
 
+    bool has_plan_ = false;
+    std::vector<ActionZone> pending_zones_;
     std::vector<ActionZone> zones_;
     std::vector<size_t> route_;
     size_t current_idx_ = 0;
@@ -174,9 +187,24 @@ class DecisionNode : public rclcpp::Node {
     // Re-publishes the active candidate so the arbiter keeps a fresh view.
     void publishCurrentCandidate();
 
+    // ---- synchronized-phase coordination (LOCAL <-> TWINNED) --------------
+    void handlePeerState();      // react to the peer's mission state
+    void broadcastState();       // publish this side's mission state
+    void triggerActTransition(); // become the Act coordinator
+    void adoptPlan(const std::string &author,
+                   const std::vector<ActionZone> &zones); // accept a peer plan
+    void enterDone();                                     // stop everything when anyone finishes
+    std::vector<ActionZone> currentZones();               // throttled local detection
+    std::vector<ActionZone> peerZones() const;            // parse last peer state
+    std::vector<ActionZone> mergeZones(
+        const std::vector<ActionZone> &own,
+        const std::vector<ActionZone> &peer) const;
+
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr thermal_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr spatial_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr costmap_sub_;
+    rclcpp::Publisher<thermocator_msgs::msg::MissionState>::SharedPtr state_pub_;
+    rclcpp::Subscription<thermocator_msgs::msg::MissionState>::SharedPtr peer_state_sub_;
     rclcpp::TimerBase::SharedPtr control_timer_;
 
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -198,6 +226,17 @@ class DecisionNode : public rclcpp::Node {
     };
 
     Phase phase_ = Phase::WAITING;
+
+    // Synchronized-phase coordination state.
+    thermocator_msgs::msg::MissionState::SharedPtr peer_state_;
+    bool plan_adopted_ = false;
+    std::string plan_author_;
+    std::vector<ActionZone> agreed_zones_;
+    double merge_dedup_radius_ = 1.5;
+
+    std::vector<ActionZone> cached_zones_;
+    std::chrono::steady_clock::time_point last_zone_calc_{};
+    bool zones_ever_calced_ = false;
 };
 
 } // namespace thermocator

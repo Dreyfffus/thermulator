@@ -1,6 +1,7 @@
 #include "thermocator/decision_node.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -316,6 +317,10 @@ bool Actor::update() {
 }
 
 void Actor::handlePlanning() {
+    // Wait until the decision node has installed the agreed (merged) plan.
+    if (!has_plan_)
+        return;
+
     nav_msgs::msg::OccupancyGrid::SharedPtr thermal_copy;
     nav_msgs::msg::OccupancyGrid::SharedPtr costmap_copy;
     {
@@ -326,9 +331,17 @@ void Actor::handlePlanning() {
     if (!thermal_copy || !costmap_copy)
         return;
 
-    zones_ = clusterHotSpots(*costmap_copy, *thermal_copy);
+    // The agreed plan is shared across domains, but each side nudges every zone
+    // to a cell that is navigable on its own costmap before visiting it.
+    zones_.clear();
+    zones_.reserve(pending_zones_.size());
+    for (const auto &z : pending_zones_) {
+        const auto [nx, ny] = nudgeToFreeCell(z.world_x, z.world_y, *costmap_copy);
+        zones_.push_back({nx, ny, z.strength});
+    }
+
     if (zones_.empty()) {
-        RCLCPP_WARN(ctx_.logger, "[Actor] No hot spots -- done");
+        RCLCPP_WARN(ctx_.logger, "[Actor] Agreed plan is empty -- done");
         complete_ = true;
         return;
     }
@@ -341,10 +354,24 @@ void Actor::handlePlanning() {
                        pose.has_value() ? pose->second : 0.0);
     current_idx_ = 0;
 
-    RCLCPP_INFO(ctx_.logger, "[Actor] %zu zones", zones_.size());
+    RCLCPP_INFO(ctx_.logger, "[Actor] actioning %zu agreed zones", zones_.size());
     ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
 
     state_ = State::NAVIGATING;
+}
+
+std::vector<ActionZone> Actor::computeZones(
+    const nav_msgs::msg::OccupancyGrid &costmap,
+    const nav_msgs::msg::OccupancyGrid &thermal) const {
+    return clusterHotSpots(costmap, thermal);
+}
+
+void Actor::setPlan(const std::vector<ActionZone> &zones) {
+    pending_zones_ = zones;
+    has_plan_ = true;
+    complete_ = false;
+    current_idx_ = 0;
+    state_ = State::PLANNING;
 }
 
 void Actor::handleNavigating() {
@@ -631,6 +658,7 @@ DecisionNode::DecisionNode() : Node("decision_node") {
     declare_parameter("robot_frame", std::string("base_footprint"));
     declare_parameter("goal_source", std::string("LOCAL"));
     declare_parameter("arrival_radius", 0.4);
+    declare_parameter("merge_dedup_radius", 1.5);
     declare_parameter("coverage_threshold", 0.95);
     declare_parameter("sensor_coverage_radius", 0.3);
     declare_parameter("goal_min_distance", 0.5);
@@ -671,6 +699,7 @@ DecisionNode::DecisionNode() : Node("decision_node") {
     ctx_.robot_frame = robot_frame;
     ctx_.goal_source = get_parameter("goal_source").as_string();
     ctx_.arrival_radius = get_parameter("arrival_radius").as_double();
+    merge_dedup_radius_ = get_parameter("merge_dedup_radius").as_double();
 
     ctx_.goal_pub = create_publisher<thermocator_msgs::msg::GoalCandidate>(
         "/thermocator/goals", rclcpp::QoS(10).reliable());
@@ -693,6 +722,22 @@ DecisionNode::DecisionNode() : Node("decision_node") {
         "/global_costmap/costmap", latch,
         std::bind(&DecisionNode::costmapCallback, this,
                   std::placeholders::_1));
+
+    // Mission-state coordination. Each side publishes on its own source topic and
+    // listens to the peer's, so the (bidirectional) domain bridge never loops.
+    const bool is_local = ctx_.goal_source != "TWINNED";
+    const std::string own_topic =
+        is_local ? "/thermocator/state/local" : "/thermocator/state/twinned";
+    const std::string peer_topic =
+        is_local ? "/thermocator/state/twinned" : "/thermocator/state/local";
+
+    state_pub_ = create_publisher<thermocator_msgs::msg::MissionState>(
+        own_topic, rclcpp::QoS(10).reliable());
+    peer_state_sub_ = create_subscription<thermocator_msgs::msg::MissionState>(
+        peer_topic, rclcpp::QoS(10).reliable(),
+        [this](thermocator_msgs::msg::MissionState::SharedPtr msg) {
+            peer_state_ = msg;
+        });
 
     Explorer::Params ep;
     ep.coverage_threshold = get_parameter("coverage_threshold").as_double();
@@ -800,30 +845,193 @@ void DecisionNode::controlLoop() {
                                  "Waiting for maps and costmap ...");
             return;
         }
-        RCLCPP_INFO(get_logger(), "Ready -- Phase 1");
+        RCLCPP_INFO(get_logger(), "Ready -- Phase 1 (Explore)");
         phase_ = Phase::PHASE1;
     }
+
+    // React to the peer first: it may pull us into Act or Done.
+    handlePeerState();
 
     updateGoalStatus();
 
     if (phase_ == Phase::PHASE1) {
-        if (explorer_->update()) {
-            RCLCPP_INFO(get_logger(), "Phase 1 done -- Phase 2");
-            phase_ = Phase::PHASE2;
+        const bool explore_done = explorer_->update();
+        if (explore_done && !plan_adopted_) {
+            // We finished exploring first -> become the Act coordinator.
+            triggerActTransition();
         }
     } else if (phase_ == Phase::PHASE2) {
         if (actor_->update()) {
-            RCLCPP_INFO(get_logger(), "Phase 2 done -- mission complete");
-            phase_ = Phase::DONE;
+            RCLCPP_INFO(get_logger(), "Phase 2 done -- broadcasting DONE");
+            enterDone();
         }
     } else {
         RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 30000,
                              "Mission complete");
     }
 
+    broadcastState();
+
     // Heartbeat: keep the arbiter's view of this proposer's goal fresh.
-    if (ctx_.goal_active)
+    if (phase_ != Phase::DONE && ctx_.goal_active)
         publishCurrentCandidate();
+}
+
+void DecisionNode::handlePeerState() {
+    if (!peer_state_ || phase_ == Phase::DONE)
+        return;
+
+    const auto &p = *peer_state_;
+
+    if (p.phase == thermocator_msgs::msg::MissionState::PHASE_DONE) {
+        RCLCPP_INFO(get_logger(), "[Sync] peer %s finished -- finishing too",
+                    p.source.c_str());
+        enterDone();
+        return;
+    }
+
+    if (p.phase == thermocator_msgs::msg::MissionState::PHASE_ACT && p.plan) {
+        if (!plan_adopted_) {
+            adoptPlan(p.source, peerZones());
+        } else if (plan_author_ != "LOCAL" && p.source == "LOCAL") {
+            // Simultaneous trigger: LOCAL's plan wins the tie-break.
+            RCLCPP_INFO(get_logger(),
+                        "[Sync] adopting LOCAL plan over our own (tie-break)");
+            adoptPlan(p.source, peerZones());
+        }
+    }
+}
+
+void DecisionNode::triggerActTransition() {
+    const auto own = currentZones();
+    const auto merged = mergeZones(own, peerZones());
+
+    plan_adopted_ = true;
+    plan_author_ = ctx_.goal_source;
+    agreed_zones_ = merged;
+    actor_->setPlan(merged);
+    phase_ = Phase::PHASE2;
+
+    RCLCPP_INFO(get_logger(),
+                "[Sync] Explore done -- I am Act coordinator: %zu own + peer "
+                "merged into %zu zones",
+                own.size(), merged.size());
+}
+
+void DecisionNode::adoptPlan(const std::string &author,
+                             const std::vector<ActionZone> &zones) {
+    plan_adopted_ = true;
+    plan_author_ = author;
+    agreed_zones_ = zones;
+    actor_->setPlan(zones);
+    phase_ = Phase::PHASE2;
+    RCLCPP_INFO(get_logger(), "[Sync] adopted %s plan: %zu zones -- Phase 2",
+                author.c_str(), zones.size());
+}
+
+void DecisionNode::enterDone() {
+    phase_ = Phase::DONE;
+    ctx_.goal_active = false;
+}
+
+std::vector<ActionZone> DecisionNode::currentZones() {
+    nav_msgs::msg::OccupancyGrid::SharedPtr thermal_copy;
+    nav_msgs::msg::OccupancyGrid::SharedPtr costmap_copy;
+    {
+        std::lock_guard<std::mutex> lk(*map_mutex_);
+        thermal_copy = ctx_.thermal_map;
+        costmap_copy = ctx_.costmap;
+    }
+    if (!thermal_copy || !costmap_copy)
+        return cached_zones_;
+
+    // Throttle the (whole-grid) clustering to ~3 s during exploration.
+    const auto now_t = std::chrono::steady_clock::now();
+    const double age =
+        std::chrono::duration<double>(now_t - last_zone_calc_).count();
+    if (!zones_ever_calced_ || age > 3.0) {
+        cached_zones_ = actor_->computeZones(*costmap_copy, *thermal_copy);
+        last_zone_calc_ = now_t;
+        zones_ever_calced_ = true;
+    }
+    return cached_zones_;
+}
+
+std::vector<ActionZone> DecisionNode::peerZones() const {
+    std::vector<ActionZone> out;
+    if (!peer_state_)
+        return out;
+    const auto &p = *peer_state_;
+    const size_t n = p.zones.size();
+    out.reserve(n);
+    for (size_t i = 0; i < n; ++i) {
+        const double s = (i < p.strengths.size()) ? p.strengths[i] : 0.0;
+        out.push_back({p.zones[i].x, p.zones[i].y, s});
+    }
+    return out;
+}
+
+std::vector<ActionZone> DecisionNode::mergeZones(
+    const std::vector<ActionZone> &own,
+    const std::vector<ActionZone> &peer) const {
+    std::vector<ActionZone> merged = own;
+    const double r2 = merge_dedup_radius_ * merge_dedup_radius_;
+    for (const auto &pz : peer) {
+        bool dup = false;
+        for (const auto &mz : merged) {
+            const double dx = pz.world_x - mz.world_x;
+            const double dy = pz.world_y - mz.world_y;
+            if (dx * dx + dy * dy <= r2) {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup)
+            merged.push_back(pz);
+    }
+    return merged;
+}
+
+void DecisionNode::broadcastState() {
+    thermocator_msgs::msg::MissionState m;
+    m.header.stamp = now();
+    m.header.frame_id = ctx_.map_frame;
+    m.source = ctx_.goal_source;
+
+    if (phase_ == Phase::DONE) {
+        m.phase = thermocator_msgs::msg::MissionState::PHASE_DONE;
+        m.plan = false;
+    } else if (phase_ == Phase::PHASE2) {
+        m.phase = thermocator_msgs::msg::MissionState::PHASE_ACT;
+        // The plan author keeps re-advertising the agreed zones so a peer that
+        // started late (or missed the first message) still converges on them.
+        if (plan_author_ == ctx_.goal_source) {
+            m.plan = true;
+            for (const auto &z : agreed_zones_) {
+                geometry_msgs::msg::Point pt;
+                pt.x = z.world_x;
+                pt.y = z.world_y;
+                m.zones.push_back(pt);
+                m.strengths.push_back(z.strength);
+            }
+        } else {
+            m.plan = false;
+        }
+    } else {
+        // Explore: advertise our current detections so the eventual coordinator
+        // can merge them into the agreed plan.
+        m.phase = thermocator_msgs::msg::MissionState::PHASE_EXPLORE;
+        m.plan = false;
+        for (const auto &z : currentZones()) {
+            geometry_msgs::msg::Point pt;
+            pt.x = z.world_x;
+            pt.y = z.world_y;
+            m.zones.push_back(pt);
+            m.strengths.push_back(z.strength);
+        }
+    }
+
+    state_pub_->publish(m);
 }
 
 } // namespace thermocator

@@ -11,7 +11,7 @@
 #  Domain 38 = physical robot / robot-sim + navigation stack
 #  Domain 1  = digital twin (full thermocator stack + Gazebo)
 #
-#  twin design:
+#  New twin design:
 #    - The twin runs its OWN full thermocator stack (SLAM, Nav2,
 #      thermal map builder, decision node), so /map, /thermal_map
 #      and /global_costmap are produced locally on each domain and
@@ -53,6 +53,28 @@ topics:
   # Domain 1 -> Domain 38: twin's scored goal candidates into the arbiter.
   thermocator/goals:
     type: thermocator_msgs/msg/GoalCandidate
+    from_domain: 1
+    to_domain: 38
+    wait_for_publisher: false
+    qos:
+      reliability: reliable
+      durability: volatile
+      history: keep_last
+      depth: 10
+
+  thermocator/state/local:
+    type: thermocator_msgs/msg/MissionState
+    from_domain: 38
+    to_domain: 1
+    wait_for_publisher: false
+    qos:
+      reliability: reliable
+      durability: volatile
+      history: keep_last
+      depth: 10
+
+  thermocator/state/twinned:
+    type: thermocator_msgs/msg/MissionState
     from_domain: 1
     to_domain: 38
     wait_for_publisher: false

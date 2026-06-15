@@ -334,8 +334,11 @@ candidates to `/thermocator/goals` (tagged `LOCAL` on Domain 38, `TWINNED` on
 Domain 1) and tracks goal completion locally via robot-pose proximity + timeout
 (no Nav2 action feedback). The `goal_arbiter` is what actually talks to Nav2.
 
-**Subscribes:** `/map`, `/thermal_map`, `/global_costmap/costmap`
-**Publishes:** `/thermocator/goals` (`thermocator_msgs/msg/GoalCandidate`), `/thermocator/action_zones`, `/action_map`
+It also coordinates phases with its peer via `MissionState`: both sides enter Act
+and finish together, and agree on a merged action-zone plan when Act begins.
+
+**Subscribes:** `/map`, `/thermal_map`, `/global_costmap/costmap`, peer `…/state/*`
+**Publishes:** `/thermocator/goals` (`thermocator_msgs/msg/GoalCandidate`), own `…/state/*` (`MissionState`), `/thermocator/action_zones`, `/action_map`
 
 ---
 
@@ -449,6 +452,11 @@ Domain 38 (robot / robot sim + arbiter)     Domain 1 (full twin stack + Gazebo)
 - Both decision nodes publish scored `GoalCandidate`s to `/thermocator/goals`. The
   twin's are bridged 1 → 38 into the `goal_arbiter`, which selects the best of
   `LOCAL` vs `TWINNED` by score and sends it to Nav2.
+- **Phases are synchronized.** The two sides exchange a `MissionState` (paired
+  `state/local` + `state/twinned` topics) so they enter the Act phase together and
+  finish together. Whichever side finishes exploring first merges both sides'
+  detected zones into one agreed plan (ties → `LOCAL`); both then action the same
+  set independently. This also keeps the arbiter comparing like-for-like scores.
 - The twin robot is **no longer teleported**. It moves along with the real robot's
   navigation commands via bridged `/cmd_vel`, replayed into Gazebo by `ros_gz_bridge`.
 - Battery level is bridged to the twin and logged there every 10 seconds.

@@ -32,12 +32,9 @@ decision_node:
     map_frame: "map"
     robot_frame: "base_footprint"
     control_rate: 1.0
-
-    # goal_source and arrival_radius are normally set from the launch args
-    # (LOCAL on Domain 38, TWINNED on Domain 1). Values here are fallbacks.
     goal_source: "LOCAL"
     arrival_radius: 0.4
-
+    merge_dedup_radius: 1.5
     coverage_threshold: 0.95
     sensor_coverage_radius: 0.5
     goal_min_distance: 0.5

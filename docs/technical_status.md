@@ -13,8 +13,9 @@
 ## Digital twin design (current)
 
 - Both domains run the same full stack (SLAM + Nav2 + thermocator). The twin is no longer an advisory-only node set.
-- `src/thermocator_msgs` defines `GoalCandidate { geometry_msgs/PoseStamped pose, string source, float64 score }`, the message on `/thermocator/goals`. `domain_bridge` can forward it because the type is installed in both domains.
-- `src/thermocator/config/domain_bridge.yaml` now bridges only `/cmd_vel` (38ΓåÆ1), `/battery_state` (38ΓåÆ1) and `/thermocator/goals` (1ΓåÆ38). Maps/costmap/odom are produced locally per domain and are no longer bridged.
+- `src/thermocator_msgs` defines `GoalCandidate { geometry_msgs/PoseStamped pose, string source, float64 score }` (on `/thermocator/goals`) and `MissionState { phase, zones[], strengths[], plan }` (phase sync). `domain_bridge` can forward both because the types are installed in both domains.
+- Phases are synchronized across domains. Each decision node publishes its `MissionState` on `/thermocator/state/<source>` and subscribes to the peer's. The first side to finish exploring becomes the Act coordinator, merges both sides' detected zones (dedup within `merge_dedup_radius`) into one agreed plan (ties → LOCAL), and both sides action the same set independently. The first side to finish acting broadcasts `PHASE_DONE` and both stop. A side-effect: the arbiter only ever compares same-phase scores, so the earlier score-scale concern no longer bites in practice.
+- `src/thermocator/config/domain_bridge.yaml` now bridges only `/cmd_vel` (38→1), `/battery_state` (38→1) and `/thermocator/goals` (1→38). Maps/costmap/odom are produced locally per domain and are no longer bridged.
 - `src/thermocator/launch/thermulator.launch.py` takes `goal_source`, `run_arbiter` and `run_battery_monitor` args so the same file launches the LOCAL (D38) and TWINNED (D1) stacks.
 - `src/thermocator/launch/thermic_bridge.launch.py` starts the `domain_bridge` process.
 
@@ -30,12 +31,12 @@
 
 ## Remaining untested items
 
-- Score scales differ between Explorer (corridor gain) and Actor (zone strength); cross-source comparison during phase transitions may need tuning.
+- Phase sync relies on the bridged `MissionState` topics; verify both `state/local` and `state/twinned` flow before testing Act behavior.
 - The twin runs Nav2 only to provide its costmap; verify its cmd_vel chain stays idle and never fights the bridged `/cmd_vel`.
+- First-to-finish ends the mission for both sides (by design); a slower side may stop mid-action.
 - End-to-end timing tolerance must be measured during a live demo run.
 
 ## Known risks intentionally not fixed here
 
 - The custom RViz thermal display plugin is known to crash visualization. This pass does not modify or fix it.
 - Thermal grid math/indexing issues were previously identified. This pass does not modify or fix them.
-
