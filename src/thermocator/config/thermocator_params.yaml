@@ -35,7 +35,7 @@ decision_node:
     goal_source: "LOCAL"
     arrival_radius: 0.4
     merge_dedup_radius: 1.5
-    coverage_threshold: 0.95
+    coverage_threshold: 0.55
     sensor_coverage_radius: 0.5
     goal_min_distance: 0.5
     goal_timeout_seconds: 70.0

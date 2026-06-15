@@ -84,8 +84,6 @@ class Explorer {
         const nav_msgs::msg::OccupancyGrid &thermal,
         double rx, double ry, double gx, double gy) const;
 
-    // Records a scored goal candidate (published to the arbiter by the control
-    // loop heartbeat) and starts the local arrival/timeout tracking.
     void setGoal(double x, double y, double score);
     std::optional<std::pair<double, double>> getRobotPose() const;
 
@@ -115,14 +113,15 @@ class Actor {
     bool update();
     bool isComplete() const { return complete_; }
 
-    // Detect the current action zones from the given maps (used by the decision
-    // node to build/merge the agreed plan at the Explore -> Act transition).
     std::vector<ActionZone> computeZones(
         const nav_msgs::msg::OccupancyGrid &costmap,
         const nav_msgs::msg::OccupancyGrid &thermal) const;
 
-    // Install the agreed plan. The Actor will (re-)plan from these zones,
-    // nudging each to a locally navigable cell before visiting it.
+    std::vector<ActionZone> finalizePlan(
+        const std::vector<ActionZone> &merged,
+        const nav_msgs::msg::OccupancyGrid &costmap,
+        double rx, double ry) const;
+
     void setPlan(const std::vector<ActionZone> &zones);
 
   private:
@@ -181,13 +180,9 @@ class DecisionNode : public rclcpp::Node {
     void costmapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
     void controlLoop();
 
-    // Synthesizes goal success/failure from robot-pose proximity and timeout,
-    // replacing the Nav2 action feedback the node used to rely on.
     void updateGoalStatus();
-    // Re-publishes the active candidate so the arbiter keeps a fresh view.
     void publishCurrentCandidate();
 
-    // ---- synchronized-phase coordination (LOCAL <-> TWINNED) --------------
     void handlePeerState();      // react to the peer's mission state
     void broadcastState();       // publish this side's mission state
     void triggerActTransition(); // become the Act coordinator
@@ -199,6 +194,7 @@ class DecisionNode : public rclcpp::Node {
     std::vector<ActionZone> mergeZones(
         const std::vector<ActionZone> &own,
         const std::vector<ActionZone> &peer) const;
+    std::optional<std::pair<double, double>> robotPose() const;
 
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr thermal_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr spatial_sub_;
@@ -227,7 +223,6 @@ class DecisionNode : public rclcpp::Node {
 
     Phase phase_ = Phase::WAITING;
 
-    // Synchronized-phase coordination state.
     thermocator_msgs::msg::MissionState::SharedPtr peer_state_;
     bool plan_adopted_ = false;
     std::string plan_author_;

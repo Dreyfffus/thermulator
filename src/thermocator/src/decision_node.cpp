@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <numeric>
 #include <queue>
 #include <rclcpp/logging.hpp>
 #include <string>
@@ -317,29 +318,22 @@ bool Actor::update() {
 }
 
 void Actor::handlePlanning() {
-    // Wait until the decision node has installed the agreed (merged) plan.
+    // Wait until the decision node has installed the agreed (finalized) plan.
     if (!has_plan_)
         return;
 
     nav_msgs::msg::OccupancyGrid::SharedPtr thermal_copy;
-    nav_msgs::msg::OccupancyGrid::SharedPtr costmap_copy;
     {
         std::lock_guard<std::mutex> lk(*ctx_.map_mutex);
         thermal_copy = ctx_.thermal_map;
-        costmap_copy = ctx_.costmap;
     }
-    if (!thermal_copy || !costmap_copy)
+    if (!thermal_copy)
         return;
 
-    // The agreed plan is shared across domains, but each side nudges every zone
-    // to a cell that is navigable on its own costmap before visiting it.
-    zones_.clear();
-    zones_.reserve(pending_zones_.size());
-    for (const auto &z : pending_zones_) {
-        const auto [nx, ny] = nudgeToFreeCell(z.world_x, z.world_y, *costmap_copy);
-        zones_.push_back({nx, ny, z.strength});
-    }
-
+    // The plan is already merged, nudged and ordered by the coordinator. Both
+    // sides execute it VERBATIM (same points, same order) -- no re-nudging and
+    // no re-routing -- so the robot and twin run the identical plan.
+    zones_ = pending_zones_;
     if (zones_.empty()) {
         RCLCPP_WARN(ctx_.logger, "[Actor] Agreed plan is empty -- done");
         complete_ = true;
@@ -348,13 +342,12 @@ void Actor::handlePlanning() {
 
     action_grid_.Initialize(*thermal_copy);
 
-    const auto pose = getRobotPose();
-    route_ = planRoute(zones_,
-                       pose.has_value() ? pose->first : 0.0,
-                       pose.has_value() ? pose->second : 0.0);
+    route_.resize(zones_.size());
+    std::iota(route_.begin(), route_.end(), 0); // execute in the agreed order
     current_idx_ = 0;
 
-    RCLCPP_INFO(ctx_.logger, "[Actor] actioning %zu agreed zones", zones_.size());
+    RCLCPP_INFO(ctx_.logger, "[Actor] actioning %zu agreed zones (shared plan)",
+                zones_.size());
     ctx_.goal_active = ctx_.goal_succeeded = ctx_.goal_failed = false;
 
     state_ = State::NAVIGATING;
@@ -366,8 +359,28 @@ std::vector<ActionZone> Actor::computeZones(
     return clusterHotSpots(costmap, thermal);
 }
 
+std::vector<ActionZone> Actor::finalizePlan(
+    const std::vector<ActionZone> &merged,
+    const nav_msgs::msg::OccupancyGrid &costmap,
+    double rx, double ry) const {
+    // Nudge every merged zone to a navigable cell, then order into a route.
+    std::vector<ActionZone> nudged;
+    nudged.reserve(merged.size());
+    for (const auto &z : merged) {
+        const auto [nx, ny] = nudgeToFreeCell(z.world_x, z.world_y, costmap);
+        nudged.push_back({nx, ny, z.strength});
+    }
+
+    const auto order = planRoute(nudged, rx, ry);
+    std::vector<ActionZone> ordered;
+    ordered.reserve(nudged.size());
+    for (size_t idx : order)
+        ordered.push_back(nudged[idx]);
+    return ordered;
+}
+
 void Actor::setPlan(const std::vector<ActionZone> &zones) {
-    pending_zones_ = zones;
+    pending_zones_ = zones; // already finalized + ordered by the coordinator
     has_plan_ = true;
     complete_ = false;
     current_idx_ = 0;
@@ -906,16 +919,30 @@ void DecisionNode::triggerActTransition() {
     const auto own = currentZones();
     const auto merged = mergeZones(own, peerZones());
 
+    // Finalize the canonical plan ONCE (nudge + order) so both sides execute the
+    // exact same ordered points.
+    nav_msgs::msg::OccupancyGrid::SharedPtr costmap_copy;
+    {
+        std::lock_guard<std::mutex> lk(*map_mutex_);
+        costmap_copy = ctx_.costmap;
+    }
+    const auto pose = robotPose();
+    const double rx = pose.has_value() ? pose->first : 0.0;
+    const double ry = pose.has_value() ? pose->second : 0.0;
+
+    std::vector<ActionZone> agreed =
+        costmap_copy ? actor_->finalizePlan(merged, *costmap_copy, rx, ry) : merged;
+
     plan_adopted_ = true;
     plan_author_ = ctx_.goal_source;
-    agreed_zones_ = merged;
-    actor_->setPlan(merged);
+    agreed_zones_ = agreed;
+    actor_->setPlan(agreed);
     phase_ = Phase::PHASE2;
 
     RCLCPP_INFO(get_logger(),
                 "[Sync] Explore done -- I am Act coordinator: %zu own + peer "
-                "merged into %zu zones",
-                own.size(), merged.size());
+                "-> %zu agreed zones (finalized, shared verbatim)",
+                own.size(), agreed.size());
 }
 
 void DecisionNode::adoptPlan(const std::string &author,
@@ -990,6 +1017,18 @@ std::vector<ActionZone> DecisionNode::mergeZones(
             merged.push_back(pz);
     }
     return merged;
+}
+
+std::optional<std::pair<double, double>> DecisionNode::robotPose() const {
+    try {
+        const auto t = tf_buffer_->lookupTransform(
+            ctx_.map_frame, ctx_.robot_frame,
+            rclcpp::Time(0), rclcpp::Duration::from_seconds(0.1));
+        return std::make_pair(t.transform.translation.x,
+                              t.transform.translation.y);
+    } catch (const tf2::TransformException &) {
+        return std::nullopt;
+    }
 }
 
 void DecisionNode::broadcastState() {
