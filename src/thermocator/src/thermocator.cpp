@@ -4,21 +4,22 @@
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
 
-    using namespace thermocator;
+  using namespace thermocator;
 
-    rclcpp::init(argc, argv);
-    auto grid = std::make_shared<ThermalGrid>();
+  rclcpp::init(argc, argv);
+  auto grid = std::make_shared<ThermalGrid>();
 
-    {
-        auto listener = std::make_shared<WorldInitializer>(grid);
-        rclcpp::spin_until_future_complete(listener, listener->getFuture());
-        RCLCPP_INFO(rclcpp::get_logger("main"), "World Initialized - Thermal Grid ready");
-    }
+  {
+    auto listener = std::make_shared<WorldInitializer>(grid);
+    rclcpp::spin_until_future_complete(listener, listener->getFuture());
+    RCLCPP_INFO(rclcpp::get_logger("main"), "World Initialized - Thermal Grid ready");
+  }
 
-    auto builder = std::make_shared<ThermalMapBuilder>(grid);
-    rclcpp::spin(builder);
-    rclcpp::shutdown();
-    return 0;
+  auto builder = std::make_shared<ThermalMapBuilder>(grid);
+  rclcpp::spin(builder);
+  rclcpp::shutdown();
+  return 0;
 }

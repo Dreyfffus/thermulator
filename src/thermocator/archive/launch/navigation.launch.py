@@ -1,4 +1,5 @@
 import os
+
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, TimerAction
@@ -8,17 +9,17 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
 
-    pkg_thermocator = get_package_share_directory("thermocator")
-    pkg_nav2_bringup = get_package_share_directory("nav2_bringup")
+    pkg_thermocator = get_package_share_directory('thermocator')
+    pkg_nav2_bringup = get_package_share_directory('nav2_bringup')
 
     nav2_params_file = os.path.join(
-        pkg_thermocator, "config", "nav2_thermal_params.yaml"
+        pkg_thermocator, 'config', 'nav2_thermal_params.yaml'
     )
 
-    map_file = os.path.join(pkg_thermocator, "worlds", "my_map.yaml")
+    map_file = os.path.join(pkg_thermocator, 'worlds', 'my_map.yaml')
 
     thermocator_launch_file = os.path.join(
-        pkg_thermocator, "launch", "thermocator.launch.py"
+        pkg_thermocator, 'launch', 'thermocator.launch.py'
     )
 
     # -------------------------------------------------------------------------
@@ -29,13 +30,13 @@ def generate_launch_description():
     # -------------------------------------------------------------------------
     localization_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg_nav2_bringup, "launch", "localization_launch.py")
+            os.path.join(pkg_nav2_bringup, 'launch', 'localization_launch.py')
         ),
         launch_arguments={
-            "params_file": nav2_params_file,
-            "use_sim_time": "true",
-            "map": map_file,
-            "autostart": "true",
+            'params_file': nav2_params_file,
+            'use_sim_time': 'true',
+            'map': map_file,
+            'autostart': 'true',
         }.items(),
     )
 
@@ -47,12 +48,12 @@ def generate_launch_description():
     # -------------------------------------------------------------------------
     navigation_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg_nav2_bringup, "launch", "navigation_launch.py")
+            os.path.join(pkg_nav2_bringup, 'launch', 'navigation_launch.py')
         ),
         launch_arguments={
-            "params_file": nav2_params_file,
-            "use_sim_time": "true",
-            "autostart": "false",
+            'params_file': nav2_params_file,
+            'use_sim_time': 'true',
+            'autostart': 'false',
         }.items(),
     )
 
@@ -63,23 +64,23 @@ def generate_launch_description():
     # route_server excluded — not relevant for this robot.
     # -------------------------------------------------------------------------
     lifecycle_manager = Node(
-        package="nav2_lifecycle_manager",
-        executable="lifecycle_manager",
-        name="lifecycle_manager_navigation",
-        output="screen",
+        package='nav2_lifecycle_manager',
+        executable='lifecycle_manager',
+        name='lifecycle_manager_navigation',
+        output='screen',
         parameters=[
             {
-                "use_sim_time": True,
-                "autostart": True,
-                "node_names": [
-                    "controller_server",
-                    "smoother_server",
-                    "planner_server",
-                    "behavior_server",
-                    "velocity_smoother",
-                    "collision_monitor",
-                    "bt_navigator",
-                    "waypoint_follower",
+                'use_sim_time': True,
+                'autostart': True,
+                'node_names': [
+                    'controller_server',
+                    'smoother_server',
+                    'planner_server',
+                    'behavior_server',
+                    'velocity_smoother',
+                    'collision_monitor',
+                    'bt_navigator',
+                    'waypoint_follower',
                 ],
             }
         ],
@@ -97,7 +98,7 @@ def generate_launch_description():
     thermocator_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(thermocator_launch_file),
         launch_arguments={
-            "use_sim_time": "true",
+            'use_sim_time': 'true',
         }.items(),
     )
 
