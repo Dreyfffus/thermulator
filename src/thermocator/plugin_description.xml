@@ -1,3 +1,4 @@
+<class_libraries>
 <library path="thermocator_display">
  
   <class
@@ -37,3 +38,4 @@
     </description>
   </class>
 </library>
+</class_libraries>

@@ -1,0 +1,378 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Length 2325 >>
+stream
+BT
+/F1 11 Tf
+1 0 0 1 54 738 Tm (THERMOCATOR DIGITAL TWIN TEST REPORT) Tj
+1 0 0 1 54 724 Tm () Tj
+1 0 0 1 54 710 Tm () Tj
+1 0 0 1 54 696 Tm (Date: 2026-06-16) Tj
+1 0 0 1 54 682 Tm () Tj
+1 0 0 1 54 668 Tm (PURPOSE) Tj
+1 0 0 1 54 654 Tm () Tj
+1 0 0 1 54 640 Tm () Tj
+1 0 0 1 54 626 Tm (This report summarizes the local build, automated test, and runtime communication) Tj
+1 0 0 1 54 612 Tm (checks performed for the Thermocator ROS 2 digital twin workspace. The goal was) Tj
+1 0 0 1 54 598 Tm (to verify that the project builds successfully, that its automated test suite) Tj
+1 0 0 1 54 584 Tm (passes, and that the digital twin running on `ROS_DOMAIN_ID=1` can send decision) Tj
+1 0 0 1 54 570 Tm (outputs into the robot-side stack on `ROS_DOMAIN_ID=38`.) Tj
+1 0 0 1 54 556 Tm () Tj
+1 0 0 1 54 542 Tm (ENVIRONMENT) Tj
+1 0 0 1 54 528 Tm () Tj
+1 0 0 1 54 514 Tm () Tj
+1 0 0 1 54 500 Tm (* Workspace: `/home/robocup/cbl-digital-twins/jazzy_tb3_packages`) Tj
+1 0 0 1 54 486 Tm (* Validation environment: Docker) Tj
+1 0 0 1 54 472 Tm (* Docker image: `turtlebot3_ws:latest`) Tj
+1 0 0 1 54 458 Tm (* ROS domains:) Tj
+1 0 0 1 54 444 Tm (* `Domain 38`: robot-side stack / local simulation) Tj
+1 0 0 1 54 430 Tm (* `Domain 1`: digital twin Gazebo + independent Thermocator stack) Tj
+1 0 0 1 54 416 Tm () Tj
+1 0 0 1 54 402 Tm (The host machine did not have a native ROS 2 Jazzy installation at) Tj
+1 0 0 1 54 388 Tm (`/opt/ros/jazzy/setup.bash`, so validation was performed in the provided Docker) Tj
+1 0 0 1 54 374 Tm (environment.) Tj
+1 0 0 1 54 360 Tm () Tj
+1 0 0 1 54 346 Tm (BUILD AND AUTOMATED TEST RESULTS) Tj
+1 0 0 1 54 332 Tm () Tj
+1 0 0 1 54 318 Tm () Tj
+1 0 0 1 54 304 Tm (The workspace was built inside Docker with ROS 2 Jazzy and the TurtleBot3) Tj
+1 0 0 1 54 290 Tm (workspace sourced.) Tj
+1 0 0 1 54 276 Tm () Tj
+1 0 0 1 54 262 Tm (`colcon build` result:) Tj
+1 0 0 1 54 248 Tm () Tj
+1 0 0 1 54 234 Tm () Tj
+1 0 0 1 54 220 Tm (Summary: 3 packages finished) Tj
+1 0 0 1 54 206 Tm () Tj
+1 0 0 1 54 192 Tm (Packages:) Tj
+1 0 0 1 54 178 Tm (  thermocator_msgs) Tj
+1 0 0 1 54 164 Tm (  my_tb3_world) Tj
+1 0 0 1 54 150 Tm (  thermocator) Tj
+1 0 0 1 54 136 Tm () Tj
+1 0 0 1 54 122 Tm () Tj
+1 0 0 1 54 108 Tm (The full automated test run passed successfully.) Tj
+1 0 0 1 54 94 Tm () Tj
+1 0 0 1 54 80 Tm (`colcon test` result:) Tj
+ET
+endstream
+endobj
+3 0 obj
+<< /Length 1820 >>
+stream
+BT
+/F1 11 Tf
+1 0 0 1 54 738 Tm () Tj
+1 0 0 1 54 724 Tm () Tj
+1 0 0 1 54 710 Tm (100% tests passed, 0 tests failed out of 6) Tj
+1 0 0 1 54 696 Tm () Tj
+1 0 0 1 54 682 Tm (Tests passed:) Tj
+1 0 0 1 54 668 Tm (  cppcheck) Tj
+1 0 0 1 54 654 Tm (  flake8) Tj
+1 0 0 1 54 640 Tm (  lint_cmake) Tj
+1 0 0 1 54 626 Tm (  pep257) Tj
+1 0 0 1 54 612 Tm (  uncrustify) Tj
+1 0 0 1 54 598 Tm (  xmllint) Tj
+1 0 0 1 54 584 Tm () Tj
+1 0 0 1 54 570 Tm () Tj
+1 0 0 1 54 556 Tm (HEADLESS DIGITAL TWIN SMOKE TEST) Tj
+1 0 0 1 54 542 Tm () Tj
+1 0 0 1 54 528 Tm () Tj
+1 0 0 1 54 514 Tm (A headless launch of the digital twin Gazebo world was performed in Docker.) Tj
+1 0 0 1 54 500 Tm (Gazebo, `ros_gz_bridge`, entity creation, and `robot_state_publisher` started) Tj
+1 0 0 1 54 486 Tm (successfully.) Tj
+1 0 0 1 54 472 Tm () Tj
+1 0 0 1 54 458 Tm (Observed Domain 1 topics during the smoke test:) Tj
+1 0 0 1 54 444 Tm () Tj
+1 0 0 1 54 430 Tm () Tj
+1 0 0 1 54 416 Tm (/clock) Tj
+1 0 0 1 54 402 Tm (/cmd_vel) Tj
+1 0 0 1 54 388 Tm (/joint_states) Tj
+1 0 0 1 54 374 Tm (/odom) Tj
+1 0 0 1 54 360 Tm (/parameter_events) Tj
+1 0 0 1 54 346 Tm (/robot_description) Tj
+1 0 0 1 54 332 Tm (/rosout) Tj
+1 0 0 1 54 318 Tm (/scan) Tj
+1 0 0 1 54 304 Tm (/tf) Tj
+1 0 0 1 54 290 Tm (/tf_static) Tj
+1 0 0 1 54 276 Tm () Tj
+1 0 0 1 54 262 Tm () Tj
+1 0 0 1 54 248 Tm (Observed nodes:) Tj
+1 0 0 1 54 234 Tm () Tj
+1 0 0 1 54 220 Tm () Tj
+1 0 0 1 54 206 Tm (/robot_state_publisher) Tj
+1 0 0 1 54 192 Tm (/ros_gz_bridge) Tj
+1 0 0 1 54 178 Tm () Tj
+1 0 0 1 54 164 Tm () Tj
+1 0 0 1 54 150 Tm (This confirms that the digital twin simulation can start and publish the basic) Tj
+1 0 0 1 54 136 Tm (Gazebo bridge topics required by the rest of the stack.) Tj
+1 0 0 1 54 122 Tm () Tj
+1 0 0 1 54 108 Tm (RUNTIME SYSTEM CHECKS) Tj
+1 0 0 1 54 94 Tm () Tj
+1 0 0 1 54 80 Tm () Tj
+ET
+endstream
+endobj
+4 0 obj
+<< /Length 2023 >>
+stream
+BT
+/F1 11 Tf
+1 0 0 1 54 738 Tm (The user then started the full runtime setup through `scripts/bin/dock` and) Tj
+1 0 0 1 54 724 Tm (inspected topics from an attached Docker shell.) Tj
+1 0 0 1 54 710 Tm () Tj
+1 0 0 1 54 696 Tm (DOMAIN 38 ROBOT-SIDE TOPICS) Tj
+1 0 0 1 54 682 Tm () Tj
+1 0 0 1 54 668 Tm () Tj
+1 0 0 1 54 654 Tm (Command:) Tj
+1 0 0 1 54 640 Tm () Tj
+1 0 0 1 54 626 Tm () Tj
+1 0 0 1 54 612 Tm (ROS_DOMAIN_ID=38 ros2 topic list | grep -E '^/\(scan|odom|cmd_vel|thermocator/goals|thermocator/state/twinned\)$') Tj
+1 0 0 1 54 598 Tm () Tj
+1 0 0 1 54 584 Tm () Tj
+1 0 0 1 54 570 Tm (Observed:) Tj
+1 0 0 1 54 556 Tm () Tj
+1 0 0 1 54 542 Tm () Tj
+1 0 0 1 54 528 Tm (/cmd_vel) Tj
+1 0 0 1 54 514 Tm (/odom) Tj
+1 0 0 1 54 500 Tm (/scan) Tj
+1 0 0 1 54 486 Tm (/thermocator/goals) Tj
+1 0 0 1 54 472 Tm (/thermocator/state/twinned) Tj
+1 0 0 1 54 458 Tm () Tj
+1 0 0 1 54 444 Tm () Tj
+1 0 0 1 54 430 Tm (This shows that the robot-side simulation/stack is active and that the bridged) Tj
+1 0 0 1 54 416 Tm (twin mission state and goal topic are present on Domain 38.) Tj
+1 0 0 1 54 402 Tm () Tj
+1 0 0 1 54 388 Tm (DOMAIN 1 DIGITAL TWIN TOPICS) Tj
+1 0 0 1 54 374 Tm () Tj
+1 0 0 1 54 360 Tm () Tj
+1 0 0 1 54 346 Tm (Command:) Tj
+1 0 0 1 54 332 Tm () Tj
+1 0 0 1 54 318 Tm () Tj
+1 0 0 1 54 304 Tm (ROS_DOMAIN_ID=1 ros2 topic list | grep -E '^/\(clock|scan|odom|cmd_vel|thermocator/goals|thermocator/state/local\)$') Tj
+1 0 0 1 54 290 Tm () Tj
+1 0 0 1 54 276 Tm () Tj
+1 0 0 1 54 262 Tm (Observed:) Tj
+1 0 0 1 54 248 Tm () Tj
+1 0 0 1 54 234 Tm () Tj
+1 0 0 1 54 220 Tm (/clock) Tj
+1 0 0 1 54 206 Tm (/cmd_vel) Tj
+1 0 0 1 54 192 Tm (/odom) Tj
+1 0 0 1 54 178 Tm (/scan) Tj
+1 0 0 1 54 164 Tm (/thermocator/state/local) Tj
+1 0 0 1 54 150 Tm () Tj
+1 0 0 1 54 136 Tm () Tj
+1 0 0 1 54 122 Tm (The initial filtered check showed the core digital twin simulation topics and) Tj
+1 0 0 1 54 108 Tm (the local mission state bridged from Domain 38 into Domain 1.) Tj
+1 0 0 1 54 94 Tm () Tj
+1 0 0 1 54 80 Tm (DOMAIN 1 DIGITAL TWIN STACK NODES) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Length 2005 >>
+stream
+BT
+/F1 11 Tf
+1 0 0 1 54 738 Tm () Tj
+1 0 0 1 54 724 Tm () Tj
+1 0 0 1 54 710 Tm (Command:) Tj
+1 0 0 1 54 696 Tm () Tj
+1 0 0 1 54 682 Tm () Tj
+1 0 0 1 54 668 Tm (ROS_DOMAIN_ID=1 ros2 node list | grep -E 'thermocator|decision|thermal|cartographer|planner|controller') Tj
+1 0 0 1 54 654 Tm () Tj
+1 0 0 1 54 640 Tm () Tj
+1 0 0 1 54 626 Tm (Observed:) Tj
+1 0 0 1 54 612 Tm () Tj
+1 0 0 1 54 598 Tm () Tj
+1 0 0 1 54 584 Tm (/cartographer_node) Tj
+1 0 0 1 54 570 Tm (/cartographer_occupancy_grid_node) Tj
+1 0 0 1 54 556 Tm (/controller_server) Tj
+1 0 0 1 54 542 Tm (/decision_node) Tj
+1 0 0 1 54 528 Tm (/planner_server) Tj
+1 0 0 1 54 514 Tm (/thermal_broadcaster) Tj
+1 0 0 1 54 500 Tm (/thermal_map_builder) Tj
+1 0 0 1 54 486 Tm (/thermocator_domain_bridge_1) Tj
+1 0 0 1 54 472 Tm () Tj
+1 0 0 1 54 458 Tm () Tj
+1 0 0 1 54 444 Tm (This confirms that the digital twin is not only a Gazebo model. It is running) Tj
+1 0 0 1 54 430 Tm (its own SLAM, Nav2, thermal map, decision, and bridge-related components.) Tj
+1 0 0 1 54 416 Tm () Tj
+1 0 0 1 54 402 Tm (DOMAIN 1 MAPPING AND DECISION TOPICS) Tj
+1 0 0 1 54 388 Tm () Tj
+1 0 0 1 54 374 Tm () Tj
+1 0 0 1 54 360 Tm (Observed relevant Domain 1 topics:) Tj
+1 0 0 1 54 346 Tm () Tj
+1 0 0 1 54 332 Tm () Tj
+1 0 0 1 54 318 Tm (/action_map) Tj
+1 0 0 1 54 304 Tm (/global_costmap/costmap) Tj
+1 0 0 1 54 290 Tm (/goal_pose) Tj
+1 0 0 1 54 276 Tm (/local_costmap/costmap) Tj
+1 0 0 1 54 262 Tm (/map) Tj
+1 0 0 1 54 248 Tm (/submap_list) Tj
+1 0 0 1 54 234 Tm (/thermal_map) Tj
+1 0 0 1 54 220 Tm (/thermal_reading) Tj
+1 0 0 1 54 206 Tm (/thermocator/goals) Tj
+1 0 0 1 54 192 Tm () Tj
+1 0 0 1 54 178 Tm () Tj
+1 0 0 1 54 164 Tm (This confirms that the digital twin stack produces map, thermal map, costmap,) Tj
+1 0 0 1 54 150 Tm (and goal candidate topics.) Tj
+1 0 0 1 54 136 Tm () Tj
+1 0 0 1 54 122 Tm (GOAL BRIDGE VERIFICATION) Tj
+1 0 0 1 54 108 Tm () Tj
+1 0 0 1 54 94 Tm () Tj
+1 0 0 1 54 80 Tm (The most important digital twin communication check was whether goal candidates) Tj
+ET
+endstream
+endobj
+6 0 obj
+<< /Length 1938 >>
+stream
+BT
+/F1 11 Tf
+1 0 0 1 54 738 Tm (generated on Domain 1 appear on Domain 38.) Tj
+1 0 0 1 54 724 Tm () Tj
+1 0 0 1 54 710 Tm (DOMAIN 1 TWIN GOAL CANDIDATE) Tj
+1 0 0 1 54 696 Tm () Tj
+1 0 0 1 54 682 Tm () Tj
+1 0 0 1 54 668 Tm (Command:) Tj
+1 0 0 1 54 654 Tm () Tj
+1 0 0 1 54 640 Tm () Tj
+1 0 0 1 54 626 Tm (ROS_DOMAIN_ID=1 ros2 topic echo /thermocator/goals --once) Tj
+1 0 0 1 54 612 Tm () Tj
+1 0 0 1 54 598 Tm () Tj
+1 0 0 1 54 584 Tm (Observed sample:) Tj
+1 0 0 1 54 570 Tm () Tj
+1 0 0 1 54 556 Tm () Tj
+1 0 0 1 54 542 Tm (pose.header.frame_id: map) Tj
+1 0 0 1 54 528 Tm (pose.pose.position.x: 1.3339702577560866) Tj
+1 0 0 1 54 514 Tm (pose.pose.position.y: -0.2727715481081707) Tj
+1 0 0 1 54 500 Tm (source: TWINNED) Tj
+1 0 0 1 54 486 Tm (score: 93.53957250144425) Tj
+1 0 0 1 54 472 Tm () Tj
+1 0 0 1 54 458 Tm () Tj
+1 0 0 1 54 444 Tm (This proves that the digital twin `decision_node` publishes `TWINNED` goal) Tj
+1 0 0 1 54 430 Tm (candidates on Domain 1.) Tj
+1 0 0 1 54 416 Tm () Tj
+1 0 0 1 54 402 Tm (DOMAIN 38 BRIDGED GOAL CANDIDATES) Tj
+1 0 0 1 54 388 Tm () Tj
+1 0 0 1 54 374 Tm () Tj
+1 0 0 1 54 360 Tm (Command:) Tj
+1 0 0 1 54 346 Tm () Tj
+1 0 0 1 54 332 Tm () Tj
+1 0 0 1 54 318 Tm (ROS_DOMAIN_ID=38 ros2 topic echo /thermocator/goals) Tj
+1 0 0 1 54 304 Tm () Tj
+1 0 0 1 54 290 Tm () Tj
+1 0 0 1 54 276 Tm (Observed source sequence:) Tj
+1 0 0 1 54 262 Tm () Tj
+1 0 0 1 54 248 Tm () Tj
+1 0 0 1 54 234 Tm (source: TWINNED) Tj
+1 0 0 1 54 220 Tm (source: LOCAL) Tj
+1 0 0 1 54 206 Tm (source: TWINNED) Tj
+1 0 0 1 54 192 Tm (source: LOCAL) Tj
+1 0 0 1 54 178 Tm (source: TWINNED) Tj
+1 0 0 1 54 164 Tm (source: LOCAL) Tj
+1 0 0 1 54 150 Tm (source: TWINNED) Tj
+1 0 0 1 54 136 Tm (source: LOCAL) Tj
+1 0 0 1 54 122 Tm () Tj
+1 0 0 1 54 108 Tm () Tj
+1 0 0 1 54 94 Tm (This is the key evidence that the digital twin goal stream is bridged into the) Tj
+1 0 0 1 54 80 Tm (robot-side domain. Domain 38 receives both local goal candidates and twin) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Length 2145 >>
+stream
+BT
+/F1 11 Tf
+1 0 0 1 54 738 Tm (generated goal candidates on the same `/thermocator/goals` channel.) Tj
+1 0 0 1 54 724 Tm () Tj
+1 0 0 1 54 710 Tm (INTERPRETATION) Tj
+1 0 0 1 54 696 Tm () Tj
+1 0 0 1 54 682 Tm () Tj
+1 0 0 1 54 668 Tm (The observed alternating `LOCAL` and `TWINNED` messages on Domain 38 mean:) Tj
+1 0 0 1 54 654 Tm () Tj
+1 0 0 1 54 640 Tm (* The Domain 38 `decision_node` publishes `LOCAL` goal candidates.) Tj
+1 0 0 1 54 626 Tm (* The Domain 1 digital twin `decision_node` publishes `TWINNED` goal candidates.) Tj
+1 0 0 1 54 612 Tm (* `domain_bridge` successfully forwards `TWINNED` goal candidates from Domain 1) Tj
+1 0 0 1 54 598 Tm (  to Domain 38.) Tj
+1 0 0 1 54 584 Tm (* The robot-side `goal_arbiter` can compare local and twin-generated candidates.) Tj
+1 0 0 1 54 570 Tm () Tj
+1 0 0 1 54 556 Tm (CONCLUSION) Tj
+1 0 0 1 54 542 Tm () Tj
+1 0 0 1 54 528 Tm () Tj
+1 0 0 1 54 514 Tm (The project implements a functional ROS 2 / Gazebo digital twin prototype. The) Tj
+1 0 0 1 54 500 Tm (digital twin runs an independent stack on Domain 1 and contributes decision) Tj
+1 0 0 1 54 486 Tm (outputs to the robot-side Domain 38 stack through `domain_bridge`.) Tj
+1 0 0 1 54 472 Tm () Tj
+1 0 0 1 54 458 Tm (Verified status:) Tj
+1 0 0 1 54 444 Tm () Tj
+1 0 0 1 54 430 Tm () Tj
+1 0 0 1 54 416 Tm (Build:                  PASS) Tj
+1 0 0 1 54 402 Tm (Automated tests/lint:   PASS) Tj
+1 0 0 1 54 388 Tm (Digital twin launch:    PASS) Tj
+1 0 0 1 54 374 Tm (Domain 1 stack active:  PASS) Tj
+1 0 0 1 54 360 Tm (Goal bridge 1 -> 38:    PASS) Tj
+1 0 0 1 54 346 Tm () Tj
+1 0 0 1 54 332 Tm () Tj
+1 0 0 1 54 318 Tm (Recommended report wording:) Tj
+1 0 0 1 54 304 Tm () Tj
+1 0 0 1 54 290 Tm () Tj
+1 0 0 1 54 276 Tm (The system implements a ROS 2 based digital twin architecture in which a) Tj
+1 0 0 1 54 262 Tm (Gazebo-based twin runs an independent Thermocator stack and publishes TWINNED) Tj
+1 0 0 1 54 248 Tm (goal candidates. These candidates are bridged into the robot-side domain,) Tj
+1 0 0 1 54 234 Tm (where they appear alongside LOCAL candidates and can be evaluated by the) Tj
+1 0 0 1 54 220 Tm (goal arbiter.) Tj
+1 0 0 1 54 206 Tm () Tj
+ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 8 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 2 0 R >>
+endobj
+9 0 obj
+<< /Type /Page /Parent 8 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 3 0 R >>
+endobj
+10 0 obj
+<< /Type /Page /Parent 8 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 4 0 R >>
+endobj
+11 0 obj
+<< /Type /Page /Parent 8 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 5 0 R >>
+endobj
+12 0 obj
+<< /Type /Page /Parent 8 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 6 0 R >>
+endobj
+13 0 obj
+<< /Type /Page /Parent 8 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 7 0 R >>
+endobj
+14 0 obj
+<< /Type /Pages /Kids [8 0 R 9 0 R 10 0 R 11 0 R 12 0 R 13 0 R] /Count 6 >>
+endobj
+15 0 obj
+<< /Type /Catalog /Pages 14 0 R >>
+endobj
+xref
+0 16
+0000000000 65535 f 
+0000000009 00000 n 
+0000000079 00000 n 
+0000002456 00000 n 
+0000004328 00000 n 
+0000006403 00000 n 
+0000008460 00000 n 
+0000010450 00000 n 
+0000012647 00000 n 
+0000012773 00000 n 
+0000012899 00000 n 
+0000013026 00000 n 
+0000013153 00000 n 
+0000013280 00000 n 
+0000013407 00000 n 
+0000013499 00000 n 
+trailer
+<< /Size 16 /Root 15 0 R >>
+startxref
+13550
+%%EOF
