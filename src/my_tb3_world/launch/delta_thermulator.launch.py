@@ -30,12 +30,6 @@ def generate_launch_description():
 
     set_domain = SetEnvironmentVariable("ROS_DOMAIN_ID", "1")
 
-    # gz-transport is NOT isolated by ROS_DOMAIN_ID. On the home Docker setup the
-    # robot sim and the twin sim run on the same host, so without a unique
-    # partition their Gazebo servers and ros_gz_bridge instances share the same
-    # gz topics (/cmd_vel, /odom, ...) and both robots move in unison. A distinct
-    # GZ_PARTITION per simulation keeps each Gazebo + bridge fully separated, so
-    # the twin only moves from the /cmd_vel explicitly bridged in by domain_bridge.
     set_gz_partition = SetEnvironmentVariable("GZ_PARTITION", "thermulator_twin")
 
     set_env_vars_resources = AppendEnvironmentVariable(
@@ -112,8 +106,8 @@ def generate_launch_description():
             description="Start the Gazebo GUI client. Keep false for headless topic tests.",
         )
     )
-    ld.add_action(set_domain)  # must be first
-    ld.add_action(set_gz_partition)  # isolate gz-transport from the robot sim
+    ld.add_action(set_domain)
+    ld.add_action(set_gz_partition)
     ld.add_action(set_env_vars_resources)
     ld.add_action(gzserver_cmd)
     ld.add_action(ros_gz_bridge)
