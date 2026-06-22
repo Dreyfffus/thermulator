@@ -6,7 +6,7 @@
 #include <sensor_msgs/msg/battery_state.hpp>
 
 namespace thermocator {
-
+// Battery echo for Domain 1 (Twinned Domain) demonstrating comunication for sync.
 class BatteryMonitor : public rclcpp::Node {
   public:
     BatteryMonitor()

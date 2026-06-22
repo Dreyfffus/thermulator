@@ -53,7 +53,7 @@ void Explorer::handleScanning() {
     RCLCPP_INFO_THROTTLE(ctx_.logger, *ctx_.clock, 3000,
                          "[Explorer] Coverage %.1f%%  sample_r=%.1fm",
                          cov * 100.0, sample_radius_);
-
+    // If acceptable coverage reached, switch to new phase
     if (cov >= default_params_.coverage_threshold) {
         RCLCPP_INFO(ctx_.logger, "[Explorer] Coverage complete");
         complete_ = true;
@@ -80,6 +80,7 @@ void Explorer::handleScanning() {
         return;
     }
 
+    // If no targets found, extend the search radius to include more cells
     sample_radius_ = std::min(
         sample_radius_ + default_params_.radius_step,
         default_params_.radius_max);
@@ -136,7 +137,8 @@ std::vector<Frontier> Explorer::detectTargets(
     valid.reserve(default_params_.samples_per_cycle);
 
     const int max_attempts = default_params_.samples_per_cycle * 4;
-
+    // limits number of samples per extension cycle to not take up too much time.
+    // Otherwise search would be O(n^2) for each cycle and growing n
     for (int attempt = 0;
          attempt < max_attempts && (int)valid.size() < default_params_.samples_per_cycle; ++attempt) {
 
@@ -151,6 +153,9 @@ std::vector<Frontier> Explorer::detectTargets(
         if (dist < default_params_.goal_min_distance) {
             continue;
         }
+
+        // After validity checks (the goal sits inside the search radius and outside
+        // the minimum distance radius) Check whether it is inside the effective map.
 
         const double wx = rx + ox;
         const double wy = ry + oy;
@@ -208,7 +213,6 @@ double Explorer::computeCoverageRatio(
                 continue;
             }
             ++total;
-
             const double wx = si.origin.position.x + (col + 0.5) * si.resolution;
             const double wy = si.origin.position.y + (row + 0.5) * si.resolution;
             const int tc = static_cast<int>((wx - ti.origin.position.x) / ti.resolution);
@@ -244,14 +248,14 @@ double Explorer::estimateGain(
 
     std::vector<bool> counted(static_cast<size_t>(ci.width) * ci.height, false);
     double gain = 0.0;
-
+    // Computes how many cells are discovered on the way to the goal.
     for (int step = 0; step <= steps; ++step) {
         const double t = static_cast<double>(step) / steps;
         const double wx = rx + t * dx;
         const double wy = ry + t * dy;
         const int cx = static_cast<int>((wx - ci.origin.position.x) / res);
         const int cy = static_cast<int>((wy - ci.origin.position.y) / res);
-
+        // radius calculation for each step made by the robot
         for (int dr = -r_cells; dr <= r_cells; ++dr) {
             for (int dc = -r_cells; dc <= r_cells; ++dc) {
                 if (dr * dr + dc * dc > r_cells * r_cells) {
@@ -357,7 +361,7 @@ void Actor::handlePlanning() {
         complete_ = true;
         return;
     }
-
+    // Initializes the action grid builder.
     action_grid_.Initialize(*thermal_copy);
 
     route_.resize(zones_.size());
@@ -383,11 +387,13 @@ std::vector<ActionZone> Actor::finalizePlan(
     double rx, double ry) const {
     std::vector<ActionZone> nudged;
     nudged.reserve(merged.size());
+    // Nudges all merged cells inside the map.
     for (const auto &z : merged) {
         const auto [nx, ny] = nudgeToFreeCell(z.world_x, z.world_y, costmap);
         nudged.push_back({nx, ny, z.strength});
     }
 
+    // plans the order of traversal, greedy nearest neighbor
     const auto order = planRoute(nudged, rx, ry);
     std::vector<ActionZone> ordered;
     ordered.reserve(nudged.size());
@@ -469,7 +475,7 @@ std::vector<ActionZone> Actor::clusterHotSpots(
     };
     std::vector<HotCell> hot;
     hot.reserve(1024);
-
+    // Cluster all hot considered cells
     for (uint32_t row = 0; row < ti.height; ++row) {
         for (uint32_t col = 0; col < ti.width; ++col) {
             const auto v =
@@ -494,6 +500,8 @@ std::vector<ActionZone> Actor::clusterHotSpots(
         if (assigned[i]) {
             continue;
         }
+        // Calculates the clusters based on proximity to eachother
+        // within a maximum radius
         double sx = 0, sy = 0, sh = 0;
         int cnt = 0;
         for (size_t j = i; j < hot.size(); ++j) {
@@ -516,6 +524,7 @@ std::vector<ActionZone> Actor::clusterHotSpots(
             ++cnt;
         }
 
+        // average positions of the cluster
         const double raw_x = sx / cnt;
         const double raw_y = sy / cnt;
 
@@ -553,13 +562,13 @@ std::pair<double, double> Actor::nudgeToFreeCell(
     const size_t start_idx = static_cast<size_t>(start_row) * ci.width + start_col;
     visited[start_idx] = true;
     q.push({start_row, start_col});
-
+    // Neighbors
     const int nb8[8][2] = {
         {-1, -1}, {-1, 0}, {-1, 1}, {0, -1}, {0, 1}, {1, -1}, {1, 0}, {1, 1}};
 
     const int max_search_cells = params_.max_search_cells;
     int searched = 0;
-
+    // BFS to nearest valid cell.
     while (!q.empty() && searched < max_search_cells) {
         const auto [r, c] = q.front();
         q.pop();
@@ -856,6 +865,8 @@ void DecisionNode::updateGoalStatus() {
     const double elapsed = std::chrono::duration<double>(
                                std::chrono::steady_clock::now() - ctx_.goal_sent_time)
                                .count();
+    // Because we dont have status from Nav for goal acceptance/ rejection,
+    // we time out and reject ourselves.
     if (elapsed > goal_timeout_seconds_) {
         RCLCPP_WARN(get_logger(), "[Decision] goal timeout %.1fs", elapsed);
         ctx_.goal_failed = true;
@@ -1090,6 +1101,7 @@ void DecisionNode::broadcastState() {
         m.plan = false;
         for (const auto &z : currentZones()) {
             geometry_msgs::msg::Point pt;
+#Logs the bridged battery state on the digital twin every 10 seconds.
             pt.x = z.world_x;
             pt.y = z.world_y;
             m.zones.push_back(pt);

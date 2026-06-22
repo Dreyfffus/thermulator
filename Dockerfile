@@ -16,8 +16,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-xacro \
     ros-jazzy-rmw-fastrtps-cpp \
     ros-jazzy-domain-bridge \
-    ros-jazzy-gz-transport13-vendor \
-    ros-jazzy-gz-msgs10-vendor \
     && rm -rf /var/lib/apt/lists/*
 
 # Build TB3 packages into the containers own workspace

@@ -15,11 +15,10 @@
 #    - The twin runs its OWN full thermocator stack (SLAM, Nav2,
 #      thermal map builder, decision node), so /map, /thermal_map
 #      and /global_costmap are produced locally on each domain and
-#      are NO LONGER bridged (that would create duplicate publishers).
+#      are NOT bridged (that would create duplicate publishers).
 #    - Each decision node publishes scored goal candidates; the
 #      twin's candidates are bridged 1 -> 38 to the goal_arbiter.
-#    - The twin robot is no longer teleported. It moves along with
-#      the real robot's navigation commands, so /cmd_vel is bridged
+#    - The DT moves according the real robot's navigation commands, so /cmd_vel is bridged
 #      38 -> 1 and replayed into the twin's Gazebo by ros_gz_bridge.
 #    - Battery state is bridged 38 -> 1 ("state synced") for logging.
 # ============================================================

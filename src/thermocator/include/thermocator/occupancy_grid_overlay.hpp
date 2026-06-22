@@ -13,7 +13,7 @@
 #include <rviz_common/properties/float_property.hpp>
 
 namespace thermocator {
-
+// General Overlay Grid Plugin class for making colored grids in Rviz2
 class OccupancyGridOverlay
     : public rviz_common::MessageFilterDisplay<nav_msgs::msg::OccupancyGrid> {
     Q_OBJECT
@@ -68,7 +68,7 @@ class OccupancyGridOverlay
     rclcpp::Logger _logger = rclcpp::get_logger("OccupancyGridOverlay");
 };
 
-class ThermalOverlay : public OccupancyGridOverlay {
+class ThermalOverlay : public OccupancyGridOverlay { // Overlay for thermal_maps
     Q_OBJECT
 
   public:
@@ -79,7 +79,7 @@ class ThermalOverlay : public OccupancyGridOverlay {
               {QColor(255, 0, 0), 1.0f}) {}
 };
 
-class ActionOverlay : public OccupancyGridOverlay {
+class ActionOverlay : public OccupancyGridOverlay { // Overlay for action_maps (influenced vs not influenced)
     Q_OBJECT
 
   public:

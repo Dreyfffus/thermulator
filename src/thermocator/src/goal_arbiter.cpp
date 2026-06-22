@@ -1,11 +1,9 @@
-// =============================================================================
 //  goal_arbiter.cpp
 //
 //  Runs on Domain 38. Collects scored goal candidates from every decision node
 //  on /thermocator/goals:
 //    - LOCAL   candidates from the Domain 38 decision node (published directly)
 //    - TWINNED candidates from the Domain 1 decision node (bridged 1 -> 38)
-// =============================================================================
 
 #include <algorithm>
 #include <chrono>

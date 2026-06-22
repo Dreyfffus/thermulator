@@ -30,6 +30,7 @@
 
 namespace thermocator {
 
+// Shared state for decision_node phases
 struct NodeContext {
     rclcpp::Logger logger = rclcpp::get_logger("NodeContext");
     rclcpp::Clock::SharedPtr clock;

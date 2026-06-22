@@ -21,6 +21,7 @@
 
 namespace thermocator {
 
+// Struct for popular frontier exploration
 struct Frontier {
     double world_x = 0.0;
     double world_y = 0.0;
@@ -29,6 +30,7 @@ struct Frontier {
     double distance = 0.0;
 };
 
+// Represents the action mechanic origin and distribution radius
 struct ActionZone {
     double world_x = 0.0;
     double world_y = 0.0;
@@ -64,24 +66,29 @@ class Explorer {
     void handleScanning();
     void handleNavigating();
 
+    // Computes the percentage of the effective map that is already
+    // thermally explored.
     double computeCoverageRatio(
-        const nav_msgs::msg::OccupancyGrid &spatial,
-        const nav_msgs::msg::OccupancyGrid &thermal) const;
-
+        const nav_msgs::msg::OccupancyGrid &spatial, // map
+        const nav_msgs::msg::OccupancyGrid &thermal  // thermal_map
+    ) const;
+    // Detects POI's. They sit outside of thermally explored area
+    // and inside the available space
     std::vector<Frontier> detectTargets(
-        const nav_msgs::msg::OccupancyGrid &thermal,
-        const nav_msgs::msg::OccupancyGrid &costmap,
+        const nav_msgs::msg::OccupancyGrid &thermal, // thermal_map
+        const nav_msgs::msg::OccupancyGrid &costmap, // global_costmap/costmap
         double rx, double ry) const;
-
+    // Chooses one goal
     Frontier chooseTarget(
         std::vector<Frontier> &candidates,
-        const nav_msgs::msg::OccupancyGrid &costmap,
-        const nav_msgs::msg::OccupancyGrid &thermal,
+        const nav_msgs::msg::OccupancyGrid &costmap, // global_costmap/costmap
+        const nav_msgs::msg::OccupancyGrid &thermal, // thermal_map
         double rx, double ry) const;
-
+    // Estimates corridor gain for a certain goal position
+    // and calculates score
     double estimateGain(
-        const nav_msgs::msg::OccupancyGrid &costmap,
-        const nav_msgs::msg::OccupancyGrid &thermal,
+        const nav_msgs::msg::OccupancyGrid &costmap, // global_costmap/costmap
+        const nav_msgs::msg::OccupancyGrid &thermal, // thermal_map
         double rx, double ry, double gx, double gy) const;
 
     void setGoal(double x, double y, double score);
@@ -113,13 +120,18 @@ class Actor {
     bool update();
     bool isComplete() const { return complete_; }
 
+    // Clusters zones of thermal action. Returns centroids
+    // of these zones for publication, along with spread.
     std::vector<ActionZone> computeZones(
-        const nav_msgs::msg::OccupancyGrid &costmap,
-        const nav_msgs::msg::OccupancyGrid &thermal) const;
+        const nav_msgs::msg::OccupancyGrid &costmap, // global_costmap/costmap
+        const nav_msgs::msg::OccupancyGrid &thermal  // thermal_map
+    ) const;
 
+    // Recalculates merged plans from both sides. The plan
+    // is deterministic so it has to be the same for both sides.
     std::vector<ActionZone> finalizePlan(
         const std::vector<ActionZone> &merged,
-        const nav_msgs::msg::OccupancyGrid &costmap,
+        const nav_msgs::msg::OccupancyGrid &costmap, // global_costmap/costmap
         double rx, double ry) const;
 
     void setPlan(const std::vector<ActionZone> &zones);
@@ -143,6 +155,8 @@ class Actor {
         const std::vector<ActionZone> &zones,
         double rx, double ry) const;
 
+    // Nudges points that sit on the border or outside of reachable
+    // zones. Mandatory since the plan is static at creation and cannot change
     std::pair<double, double> nudgeToFreeCell(
         double wx, double wy,
         const nav_msgs::msg::OccupancyGrid &costmap) const;
@@ -175,6 +189,7 @@ class DecisionNode : public rclcpp::Node {
     ~DecisionNode() override = default;
 
   private:
+    // CALLBACKS
     void thermalMapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
     void spatialMapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
     void costmapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);

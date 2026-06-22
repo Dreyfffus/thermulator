@@ -53,7 +53,6 @@ target_include_directories(decision_node PUBLIC
 )
 target_compile_features(decision_node PUBLIC cxx_std_17)
 
-# Selects the best scored goal candidate (LOCAL vs TWINNED) and drives Nav2.
 add_executable(goal_arbiter
   src/goal_arbiter.cpp
 )
@@ -64,7 +63,6 @@ target_include_directories(goal_arbiter PUBLIC
 )
 target_compile_features(goal_arbiter PUBLIC cxx_std_17)
 
-# Logs the bridged battery state on the digital twin every 10 seconds.
 add_executable(battery_monitor
   src/battery_monitor.cpp
 )

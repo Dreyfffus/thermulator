@@ -2,10 +2,8 @@
 # (TWINNED, Domain 1) move through the Explore -> Act -> Done phases together.
 #
 # Either side may trigger a phase change (whichever finishes exploring / acting
-# first). The side that triggers the Act phase merges its own detected zones with
-# the peer's last-reported zones and publishes the agreed plan (plan = true). On a
-# simultaneous trigger, LOCAL's plan wins. Once agreed, each side actions the same
-# set of points independently.
+# first). The side that makes the phase transition triggers the stransition for 
+# the other phase.
 
 uint8 PHASE_EXPLORE = 0
 uint8 PHASE_ACT = 1
